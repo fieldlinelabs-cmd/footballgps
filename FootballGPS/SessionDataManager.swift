@@ -196,12 +196,24 @@ class SessionDataManager: ObservableObject {
     private func migrateGPSDataIfNeeded() {
         guard !UserDefaults.standard.bool(forKey: migrationKey) else { return }
 
-        isMigrating = true
         let sessionIds = sessions.map { $0.id }
+
+        // 移行すべき UserDefaults エントリが存在するか事前確認
+        let idsToMigrate = sessionIds.filter {
+            UserDefaults.standard.data(forKey: "gpsData_\($0)") != nil
+        }
+
+        guard !idsToMigrate.isEmpty else {
+            // 移行対象なし（初回インストール等）: フラグだけ立てて完了
+            UserDefaults.standard.set(true, forKey: migrationKey)
+            return
+        }
+
+        isMigrating = true
         let gpsDir = gpsDirectory
 
-        Task.detached(priority: .utility) { [sessionIds, gpsDir] in
-            for sessionId in sessionIds {
+        Task.detached(priority: .utility) { [idsToMigrate, gpsDir] in
+            for sessionId in idsToMigrate {
                 let udKey = "gpsData_\(sessionId)"
                 // UserDefaults に保存された生 JSON データをそのままファイルへコピー
                 guard let data = UserDefaults.standard.data(forKey: udKey) else { continue }
