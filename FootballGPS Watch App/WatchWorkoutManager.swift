@@ -25,8 +25,11 @@ class WorkoutManager: NSObject, ObservableObject {
     @Published var currentSpeed: Double = 0 // m/s
     @Published var maxSpeed: Double = 0 // m/s
     
-    @Published var heartRate: Double = 0 // BPM（後で実装）
-    
+    @Published var heartRate: Double = 0 // BPM
+    @Published var activeCalories: Double = 0 // kcal
+    @Published var sprintCount: Int = 0
+    @Published var zoneDistances: [Double] = [0, 0, 0, 0, 0] // Zone1-5 (m)
+
     // GPS記録データ（デバッグ用に公開）
     @Published var gpsPoints: [GPSPoint] = []
     
@@ -43,6 +46,12 @@ class WorkoutManager: NSObject, ObservableObject {
     private var timer: Timer?
     private var totalPausedDuration: TimeInterval = 0
     private var pauseStartDate: Date?
+
+    // スプリント検出用
+    private var isInSprintCandidate = false
+    private var sprintCandidateStartTime: Date?
+    private var isInSprint = false
+    private var lastSprintEndTime: Date?
     
     // シミュレーター用のGPSシミュレーション
     #if targetEnvironment(simulator)
@@ -299,7 +308,8 @@ class WorkoutManager: NSObject, ObservableObject {
             duration: elapsedTime,
             totalDistance: distance,
             maxSpeed: maxSpeed,
-            avgSpeed: avgSpeed
+            avgSpeed: avgSpeed,
+            sprintCount: sprintCount
         )
         
         let gpsData = GPSData(
@@ -317,11 +327,18 @@ class WorkoutManager: NSObject, ObservableObject {
         currentSpeed = 0
         maxSpeed = 0
         heartRate = 0
+        activeCalories = 0
+        sprintCount = 0
+        zoneDistances = [0, 0, 0, 0, 0]
         locations.removeAll()
         gpsPoints.removeAll()
         startDate = nil
         totalPausedDuration = 0
         pauseStartDate = nil
+        isInSprintCandidate = false
+        sprintCandidateStartTime = nil
+        isInSprint = false
+        lastSprintEndTime = nil
     }
     
     // MARK: - Timer
@@ -342,6 +359,54 @@ class WorkoutManager: NSObject, ObservableObject {
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
+    }
+
+    // MARK: - Speed Processing
+
+    /// 速度ゾーン別距離加算とスプリント検出
+    private func processSpeedUpdate(speed: Double, timestamp: Date, distanceIncrement: Double) {
+        // 速度ゾーン別距離の加算
+        let zoneIndex: Int
+        switch speed {
+        case ..<2.0:    zoneIndex = 0 // 静止/歩行
+        case 2.0..<4.0: zoneIndex = 1 // ジョギング
+        case 4.0..<5.5: zoneIndex = 2 // ランニング
+        case 5.5..<7.0: zoneIndex = 3 // 高速ラン
+        default:        zoneIndex = 4 // スプリント
+        }
+        zoneDistances[zoneIndex] += distanceIncrement
+
+        // スプリント検出
+        let sprintThreshold: Double = 5.5
+        let sprintEndThreshold: Double = 4.5
+        let minSprintDuration: TimeInterval = 2.0
+        let minSprintInterval: TimeInterval = 5.0
+
+        if isInSprint {
+            if speed < sprintEndThreshold {
+                isInSprint = false
+                isInSprintCandidate = false
+                sprintCount += 1
+                lastSprintEndTime = timestamp
+            }
+        } else if isInSprintCandidate {
+            if speed < sprintEndThreshold {
+                isInSprintCandidate = false
+                sprintCandidateStartTime = nil
+            } else if let candidateStart = sprintCandidateStartTime,
+                      timestamp.timeIntervalSince(candidateStart) >= minSprintDuration {
+                isInSprint = true
+            }
+        } else {
+            if speed >= sprintThreshold {
+                let canStart = lastSprintEndTime == nil ||
+                    timestamp.timeIntervalSince(lastSprintEndTime!) >= minSprintInterval
+                if canStart {
+                    isInSprintCandidate = true
+                    sprintCandidateStartTime = timestamp
+                }
+            }
+        }
     }
 }
 
@@ -383,7 +448,23 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
         _ workoutBuilder: HKLiveWorkoutBuilder,
         didCollectDataOf collectedTypes: Set<HKSampleType>
     ) {
-        // データ収集時の処理（必要に応じて実装）
+        for type in collectedTypes {
+            guard let quantityType = type as? HKQuantityType else { continue }
+            // Sendable な Double? として事前に取得してから Task に渡す
+            if quantityType == HKQuantityType.quantityType(forIdentifier: .heartRate) {
+                let bpm = workoutBuilder.statistics(for: quantityType)?.mostRecentQuantity()?
+                    .doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+                Task { @MainActor in
+                    if let bpm { self.heartRate = bpm }
+                }
+            } else if quantityType == HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
+                let kcal = workoutBuilder.statistics(for: quantityType)?.sumQuantity()?
+                    .doubleValue(for: .kilocalorie())
+                Task { @MainActor in
+                    if let kcal { self.activeCalories = kcal }
+                }
+            }
+        }
     }
     
     nonisolated func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {
@@ -410,21 +491,26 @@ extension WorkoutManager: CLLocationManagerDelegate {
             let gpsPoint = GPSPoint(location: location)
             self.gpsPoints.append(gpsPoint)
             
-            // 距離を計算
+            // 距離を計算 (GPS ドリフトフィルタ: 0.3 m/s 未満は加算しない)
+            var distanceIncrement = 0.0
             if self.locations.count >= 2 {
                 let previousLocation = self.locations[self.locations.count - 2]
-                let distanceIncrement = location.distance(from: previousLocation)
-                self.distance += distanceIncrement
-            }
-            
-            // 速度を更新
-            if location.speed >= 0 {
-                self.currentSpeed = location.speed
-                if location.speed > self.maxSpeed {
-                    self.maxSpeed = location.speed
+                let d = location.distance(from: previousLocation)
+                if location.speed >= 0.3 {
+                    self.distance += d
+                    distanceIncrement = d
                 }
             }
-            
+
+            // 速度を更新
+            if location.speed >= 0 {
+                let speed = location.speed
+                self.currentSpeed = speed
+                if speed > self.maxSpeed { self.maxSpeed = speed }
+                // 速度ゾーン・スプリント処理
+                self.processSpeedUpdate(speed: speed, timestamp: location.timestamp, distanceIncrement: distanceIncrement)
+            }
+
             print("📍 GPS更新: 速度 \(String(format: "%.1f", location.speed))m/s, 総距離 \(String(format: "%.0f", self.distance))m")
         }
     }
@@ -528,19 +614,24 @@ extension WorkoutManager {
         gpsPoints.append(gpsPoint)
         locations.append(location)
         
-        // 距離を計算
+        // 距離を計算 (GPS ドリフトフィルタ: 0.3 m/s 未満は加算しない)
+        var distanceIncrement = 0.0
         if locations.count >= 2 {
             let previousLocation = locations[locations.count - 2]
-            let distanceIncrement = location.distance(from: previousLocation)
-            self.distance += distanceIncrement
+            let d = location.distance(from: previousLocation)
+            if simulatedSpeed >= 0.3 {
+                self.distance += d
+                distanceIncrement = d
+            }
         }
-        
+
         // 速度を更新
         currentSpeed = simulatedSpeed
-        if simulatedSpeed > maxSpeed {
-            maxSpeed = simulatedSpeed
-        }
-        
+        if simulatedSpeed > maxSpeed { maxSpeed = simulatedSpeed }
+
+        // 速度ゾーン・スプリント処理
+        processSpeedUpdate(speed: simulatedSpeed, timestamp: Date(), distanceIncrement: distanceIncrement)
+
         print("🧪 GPS生成: 緯度 \(String(format: "%.6f", simulatedLocation.lat)), 経度 \(String(format: "%.6f", simulatedLocation.lon)), 速度 \(String(format: "%.1f", simulatedSpeed))m/s, 総距離 \(String(format: "%.0f", distance))m")
     }
 }
