@@ -15,7 +15,7 @@ class SessionDataManager: ObservableObject {
     static let shared = SessionDataManager()
 
     @Published var sessions: [TrainingSession] = []
-    @Published var gpsDataCache: [String: GPSData] = [:]  // sessionId -> GPSData（LRU、最大3件）
+    private var gpsDataCache: [String: GPSData] = [:]  // sessionId -> GPSData（LRU、最大3件）
     @Published var isMigrating: Bool = false
 
     private let sessionsKey = "savedSessions"
