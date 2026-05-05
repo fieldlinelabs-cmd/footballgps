@@ -52,6 +52,9 @@ class WorkoutManager: NSObject, ObservableObject {
     private var sprintCandidateStartTime: Date?
     private var isInSprint = false
     private var lastSprintEndTime: Date?
+
+    // GPS 安定待ちフィルタ用（破棄した点も含む直前の位置）
+    private var previousLocation: CLLocation?
     
     // シミュレーター用のGPSシミュレーション
     #if targetEnvironment(simulator)
@@ -339,6 +342,7 @@ class WorkoutManager: NSObject, ObservableObject {
         sprintCandidateStartTime = nil
         isInSprint = false
         lastSprintEndTime = nil
+        previousLocation = nil
     }
     
     // MARK: - Timer
@@ -481,21 +485,36 @@ extension WorkoutManager: CLLocationManagerDelegate {
     ) {
         Task { @MainActor in
             guard let location = locations.last else { return }
-            
-            // 精度が低すぎる場合は無視
-            guard location.horizontalAccuracy < 50 else { return }
-            
+
+            // GPS 安定待ちフィルタ: 2条件チェック
+            // 条件1: 水平精度 < 20m（GPS が安定していることを確認）
+            let isAccurate = location.horizontalAccuracy < 20.0
+            // 条件2: 直前位置との推定速度 < 12 m/s（ジャンプでないことを確認）
+            let isNotJump: Bool
+            if let prev = self.previousLocation {
+                let elapsed = location.timestamp.timeIntervalSince(prev.timestamp)
+                let impliedSpeed = location.distance(from: prev) / max(elapsed, 0.1)
+                isNotJump = impliedSpeed < 12.0
+            } else {
+                isNotJump = true  // 初回点はジャンプ判定をスキップ
+            }
+            // 破棄する点も含めて常に更新（次回のジャンプ判定基準として使用）
+            self.previousLocation = location
+
+            guard isAccurate && isNotJump else { return }
+
+            // 直前の承認済み位置を取得してから追加
+            let prevAcceptedLocation = self.locations.last
             self.locations.append(location)
-            
+
             // GPSポイントとして保存
             let gpsPoint = GPSPoint(location: location)
             self.gpsPoints.append(gpsPoint)
-            
+
             // 距離を計算 (GPS ドリフトフィルタ: 0.3 m/s 未満は加算しない)
             var distanceIncrement = 0.0
-            if self.locations.count >= 2 {
-                let previousLocation = self.locations[self.locations.count - 2]
-                let d = location.distance(from: previousLocation)
+            if let prevLocation = prevAcceptedLocation {
+                let d = location.distance(from: prevLocation)
                 if location.speed >= 0.3 {
                     self.distance += d
                     distanceIncrement = d
