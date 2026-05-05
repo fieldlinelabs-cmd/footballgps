@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject private var dataManager = SessionDataManager.shared
+
     var body: some View {
         NavigationStack {
             List {
@@ -59,6 +61,20 @@ struct SettingsView: View {
                     Text("サポート")
                 }
                 
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { dataManager.isICloudBackupEnabled },
+                        set: { dataManager.setICloudBackupEnabled($0) }
+                    )) {
+                        Label("iCloudバックアップ", systemImage: "icloud.fill")
+                    }
+                    Text("GPSデータをiCloudにバックアップします。オフの場合、バックアップ容量を節約できます（デフォルト: オフ）。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("データ")
+                }
+
                 Section {
                     HStack {
                         Text("バージョン")

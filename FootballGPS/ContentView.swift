@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct ContentView: View {
+    @ObservedObject private var dataManager = SessionDataManager.shared
+
     var body: some View {
         TabView {
             SessionsListView()
@@ -36,6 +38,22 @@ struct ContentView: View {
                 .tabItem {
                     Label("設定", systemImage: "gear")
                 }
+        }
+        .overlay {
+            if dataManager.isMigrating {
+                ZStack {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(.white)
+                        Text("データを移行中...")
+                            .foregroundStyle(.white)
+                    }
+                    .padding(24)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(12)
+                }
+            }
         }
     }
 }
