@@ -25,11 +25,12 @@ struct ContentView: View {
                     Label("チーム", systemImage: "person.3.fill")
                 }
             
-            // DEBUG条件を一時的に外してテスト
+            #if DEBUG
             DebugTestView()
                 .tabItem {
                     Label("テスト", systemImage: "hammer.fill")
                 }
+            #endif
             
             SettingsView()
                 .tabItem {
@@ -41,8 +42,7 @@ struct ContentView: View {
 
 // MARK: - Debug Test View (シミュレーター用)
 
-// DEBUG条件を一時的に外してテスト
-// #if DEBUG
+#if DEBUG
 import CoreLocation
 
 struct DebugTestView: View {
@@ -236,11 +236,12 @@ struct DebugTestView: View {
         return GPSData(sessionId: sessionId, points: points)
     }
 }
-// #endif
+#endif
 
 #Preview {
     ContentView()
 }
+#if DEBUG
 // MARK: - Debug GPS Log View
 
 struct DebugGPSLogView: View {
@@ -764,5 +765,4 @@ struct FieldOverlayView: View {
         context.draw(text, at: CGPoint(x: point.x, y: point.y + 20))
     }
 }
-
-
+#endif

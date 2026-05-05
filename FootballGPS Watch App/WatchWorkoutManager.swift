@@ -41,6 +41,8 @@ class WorkoutManager: NSObject, ObservableObject {
     
     private var startDate: Date?
     private var timer: Timer?
+    private var totalPausedDuration: TimeInterval = 0
+    private var pauseStartDate: Date?
     
     // シミュレーター用のGPSシミュレーション
     #if targetEnvironment(simulator)
@@ -153,6 +155,7 @@ class WorkoutManager: NSObject, ObservableObject {
         #endif
         locationManager.stopUpdatingLocation()
         stopTimer()
+        pauseStartDate = Date()
         isPaused = true
         print("⏸️ ワークアウト一時停止")
     }
@@ -164,6 +167,10 @@ class WorkoutManager: NSObject, ObservableObject {
         #else
         startGPSSimulation()
         #endif
+        if let pauseStart = pauseStartDate {
+            totalPausedDuration += Date().timeIntervalSince(pauseStart)
+            pauseStartDate = nil
+        }
         locationManager.startUpdatingLocation()
         startTimer()
         isPaused = false
@@ -313,6 +320,8 @@ class WorkoutManager: NSObject, ObservableObject {
         locations.removeAll()
         gpsPoints.removeAll()
         startDate = nil
+        totalPausedDuration = 0
+        pauseStartDate = nil
     }
     
     // MARK: - Timer
@@ -320,9 +329,14 @@ class WorkoutManager: NSObject, ObservableObject {
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.elapsedTime += 1
+                self?.updateElapsedTime()
             }
         }
+    }
+
+    private func updateElapsedTime() {
+        guard let start = startDate else { return }
+        elapsedTime = Date().timeIntervalSince(start) - totalPausedDuration
     }
     
     private func stopTimer() {
