@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="FootballGPS">
+    <metadata>
+        <name>サッカートレーニング - シミュレーション</name>
+        <desc>フィールド内での移動をシミュレート</desc>
+    </metadata>
+    <trk>
+        <name>Training Session</name>
+        <trkseg>
+            <!-- スタート地点: フィールド中央 -->
+            <trkpt lat="35.681236" lon="139.767125">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:00Z</time>
+                <extensions>
+                    <speed>0.0</speed>
+                </extensions>
+            </trkpt>
+            
+            <!-- 前方へダッシュ -->
+            <trkpt lat="35.681336" lon="139.767125">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:02Z</time>
+                <extensions>
+                    <speed>5.5</speed>
+                </extensions>
+            </trkpt>
+            
+            <trkpt lat="35.681436" lon="139.767125">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:04Z</time>
+                <extensions>
+                    <speed>6.2</speed>
+                </extensions>
+            </trkpt>
+            
+            <!-- 右へ移動 -->
+            <trkpt lat="35.681436" lon="139.767225">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:06Z</time>
+                <extensions>
+                    <speed>4.8</speed>
+                </extensions>
+            </trkpt>
+            
+            <trkpt lat="35.681436" lon="139.767325">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:08Z</time>
+                <extensions>
+                    <speed>5.1</speed>
+                </extensions>
+            </trkpt>
+            
+            <!-- 斜め後方へ -->
+            <trkpt lat="35.681336" lon="139.767425">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:10Z</time>
+                <extensions>
+                    <speed>4.5</speed>
+                </extensions>
+            </trkpt>
+            
+            <trkpt lat="35.681236" lon="139.767425">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:12Z</time>
+                <extensions>
+                    <speed>3.8</speed>
+                </extensions>
+            </trkpt>
+            
+            <!-- 中央に戻る -->
+            <trkpt lat="35.681236" lon="139.767325">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:14Z</time>
+                <extensions>
+                    <speed>3.2</speed>
+                </extensions>
+            </trkpt>
+            
+            <trkpt lat="35.681236" lon="139.767225">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:16Z</time>
+                <extensions>
+                    <speed>2.5</speed>
+                </extensions>
+            </trkpt>
+            
+            <!-- ゴール -->
+            <trkpt lat="35.681236" lon="139.767125">
+                <ele>10</ele>
+                <time>2026-03-01T10:00:18Z</time>
+                <extensions>
+                    <speed>1.0</speed>
+                </extensions>
+            </trkpt>
+        </trkseg>
+    </trk>
+</gpx>

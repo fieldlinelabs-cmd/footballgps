@@ -4,4 +4,22 @@
    <FileRef
       location = "self:">
    </FileRef>
+   <FileRef
+      location = "group:HeatmapGenerator.swift">
+   </FileRef>
+   <FileRef
+      location = "group:ViewsFieldHeatmapView.swift">
+   </FileRef>
+   <FileRef
+      location = "group:ViewsFieldPositioningView.swift">
+   </FileRef>
+   <FileRef
+      location = "group:SoccerTraining.gpx">
+   </FileRef>
+   <FileRef
+      location = "group:MockDataGenerator.swift">
+   </FileRef>
+   <FileRef
+      location = "group:DebugTestView.swift">
+   </FileRef>
 </Workspace>

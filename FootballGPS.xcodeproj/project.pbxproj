@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		21A4CB8F2EE8EBAD0004C8F0 /* FootballGPS Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 21A4CB8E2EE8EBAD0004C8F0 /* FootballGPS Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		21CC99CF2F161A9C00963099 /* FootballGPS Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 215786B22F10F08300E3541D /* FootballGPS Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,25 +25,11 @@
 			remoteGlobalIDString = 21A4CB6A2EE8EBAA0004C8F0;
 			remoteInfo = FootballGPS;
 		};
-		21A4CB902EE8EBAD0004C8F0 /* PBXContainerItemProxy */ = {
+		21CC99D02F161A9D00963099 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 21A4CB632EE8EBAA0004C8F0 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 21A4CB8D2EE8EBAD0004C8F0;
-			remoteInfo = "FootballGPS Watch App";
-		};
-		21A4CB9E2EE8EBAE0004C8F0 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 21A4CB632EE8EBAA0004C8F0 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 21A4CB8D2EE8EBAD0004C8F0;
-			remoteInfo = "FootballGPS Watch App";
-		};
-		21A4CBA82EE8EBAE0004C8F0 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 21A4CB632EE8EBAA0004C8F0 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 21A4CB8D2EE8EBAD0004C8F0;
+			remoteGlobalIDString = 215786B12F10F08300E3541D;
 			remoteInfo = "FootballGPS Watch App";
 		};
 /* End PBXContainerItemProxy section */
@@ -55,7 +41,7 @@
 			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
 			dstSubfolderSpec = 16;
 			files = (
-				21A4CB8F2EE8EBAD0004C8F0 /* FootballGPS Watch App.app in Embed Watch Content */,
+				21CC99CF2F161A9C00963099 /* FootballGPS Watch App.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -63,17 +49,48 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		215786B22F10F08300E3541D /* FootballGPS Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "FootballGPS Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		21A4CB6B2EE8EBAA0004C8F0 /* FootballGPS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FootballGPS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		21A4CB782EE8EBAD0004C8F0 /* FootballGPSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FootballGPSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		21A4CB822EE8EBAD0004C8F0 /* FootballGPSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FootballGPSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		21A4CB8E2EE8EBAD0004C8F0 /* FootballGPS Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "FootballGPS Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		21A4CB9D2EE8EBAE0004C8F0 /* FootballGPS Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "FootballGPS Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		21A4CBA72EE8EBAE0004C8F0 /* FootballGPS Watch AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "FootballGPS Watch AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		2192DA0E2F11412300A86A28 /* Exceptions for "FootballGPS Watch App" folder in "FootballGPS Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Assets.xcassets,
+				WatchConnectivityService.swift,
+				WatchFootballGPS_Watch_App.swift,
+				WatchWorkoutManager.swift,
+				WatchWorkoutView.swift,
+				"実機テスト手順書.md",
+			);
+			target = 215786B12F10F08300E3541D /* FootballGPS Watch App */;
+		};
+		21A4CBE72EE93F220004C8F0 /* Exceptions for "FootballGPS" folder in "FootballGPS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 21A4CB6A2EE8EBAA0004C8F0 /* FootballGPS */;
+		};
+		21F0E19E2F177FF900A56844 /* Exceptions for "FootballGPS" folder in "FootballGPS Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ModelsTrainingSession.swift,
+			);
+			target = 215786B12F10F08300E3541D /* FootballGPS Watch App */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		21A4CB6D2EE8EBAA0004C8F0 /* FootballGPS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				21A4CBE72EE93F220004C8F0 /* Exceptions for "FootballGPS" folder in "FootballGPS" target */,
+				21F0E19E2F177FF900A56844 /* Exceptions for "FootballGPS" folder in "FootballGPS Watch App" target */,
+			);
 			path = FootballGPS;
 			sourceTree = "<group>";
 		};
@@ -89,6 +106,9 @@
 		};
 		21A4CB922EE8EBAD0004C8F0 /* FootballGPS Watch App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2192DA0E2F11412300A86A28 /* Exceptions for "FootballGPS Watch App" folder in "FootballGPS Watch App" target */,
+			);
 			path = "FootballGPS Watch App";
 			sourceTree = "<group>";
 		};
@@ -105,6 +125,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		215786AF2F10F08300E3541D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		21A4CB682EE8EBAA0004C8F0 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -126,27 +153,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		21A4CB8B2EE8EBAD0004C8F0 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		21A4CB9A2EE8EBAE0004C8F0 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		21A4CBA42EE8EBAE0004C8F0 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -159,6 +165,7 @@
 				21A4CB922EE8EBAD0004C8F0 /* FootballGPS Watch App */,
 				21A4CBA02EE8EBAE0004C8F0 /* FootballGPS Watch AppTests */,
 				21A4CBAA2EE8EBAE0004C8F0 /* FootballGPS Watch AppUITests */,
+				21CC99CE2F161A9C00963099 /* Frameworks */,
 				21A4CB6C2EE8EBAA0004C8F0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -169,16 +176,40 @@
 				21A4CB6B2EE8EBAA0004C8F0 /* FootballGPS.app */,
 				21A4CB782EE8EBAD0004C8F0 /* FootballGPSTests.xctest */,
 				21A4CB822EE8EBAD0004C8F0 /* FootballGPSUITests.xctest */,
-				21A4CB8E2EE8EBAD0004C8F0 /* FootballGPS Watch App.app */,
-				21A4CB9D2EE8EBAE0004C8F0 /* FootballGPS Watch AppTests.xctest */,
-				21A4CBA72EE8EBAE0004C8F0 /* FootballGPS Watch AppUITests.xctest */,
+				215786B22F10F08300E3541D /* FootballGPS Watch App.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		21CC99CE2F161A9C00963099 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		215786B12F10F08300E3541D /* FootballGPS Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 215786BD2F10F08500E3541D /* Build configuration list for PBXNativeTarget "FootballGPS Watch App" */;
+			buildPhases = (
+				215786AE2F10F08300E3541D /* Sources */,
+				215786AF2F10F08300E3541D /* Frameworks */,
+				215786B02F10F08300E3541D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "FootballGPS Watch App";
+			packageProductDependencies = (
+			);
+			productName = "FootballGPS Watch App Watch App";
+			productReference = 215786B22F10F08300E3541D /* FootballGPS Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
 		21A4CB6A2EE8EBAA0004C8F0 /* FootballGPS */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 21A4CBB52EE8EBAE0004C8F0 /* Build configuration list for PBXNativeTarget "FootballGPS" */;
@@ -191,7 +222,7 @@
 			buildRules = (
 			);
 			dependencies = (
-				21A4CB912EE8EBAD0004C8F0 /* PBXTargetDependency */,
+				21CC99D12F161A9D00963099 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				21A4CB6D2EE8EBAA0004C8F0 /* FootballGPS */,
@@ -249,74 +280,6 @@
 			productReference = 21A4CB822EE8EBAD0004C8F0 /* FootballGPSUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
-		21A4CB8D2EE8EBAD0004C8F0 /* FootballGPS Watch App */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 21A4CBB12EE8EBAE0004C8F0 /* Build configuration list for PBXNativeTarget "FootballGPS Watch App" */;
-			buildPhases = (
-				21A4CB8A2EE8EBAD0004C8F0 /* Sources */,
-				21A4CB8B2EE8EBAD0004C8F0 /* Frameworks */,
-				21A4CB8C2EE8EBAD0004C8F0 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				21A4CB922EE8EBAD0004C8F0 /* FootballGPS Watch App */,
-			);
-			name = "FootballGPS Watch App";
-			packageProductDependencies = (
-			);
-			productName = "FootballGPS Watch App";
-			productReference = 21A4CB8E2EE8EBAD0004C8F0 /* FootballGPS Watch App.app */;
-			productType = "com.apple.product-type.application";
-		};
-		21A4CB9C2EE8EBAE0004C8F0 /* FootballGPS Watch AppTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 21A4CBBE2EE8EBAE0004C8F0 /* Build configuration list for PBXNativeTarget "FootballGPS Watch AppTests" */;
-			buildPhases = (
-				21A4CB992EE8EBAE0004C8F0 /* Sources */,
-				21A4CB9A2EE8EBAE0004C8F0 /* Frameworks */,
-				21A4CB9B2EE8EBAE0004C8F0 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				21A4CB9F2EE8EBAE0004C8F0 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				21A4CBA02EE8EBAE0004C8F0 /* FootballGPS Watch AppTests */,
-			);
-			name = "FootballGPS Watch AppTests";
-			packageProductDependencies = (
-			);
-			productName = "FootballGPS Watch AppTests";
-			productReference = 21A4CB9D2EE8EBAE0004C8F0 /* FootballGPS Watch AppTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
-		21A4CBA62EE8EBAE0004C8F0 /* FootballGPS Watch AppUITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 21A4CBC12EE8EBAE0004C8F0 /* Build configuration list for PBXNativeTarget "FootballGPS Watch AppUITests" */;
-			buildPhases = (
-				21A4CBA32EE8EBAE0004C8F0 /* Sources */,
-				21A4CBA42EE8EBAE0004C8F0 /* Frameworks */,
-				21A4CBA52EE8EBAE0004C8F0 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				21A4CBA92EE8EBAE0004C8F0 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				21A4CBAA2EE8EBAE0004C8F0 /* FootballGPS Watch AppUITests */,
-			);
-			name = "FootballGPS Watch AppUITests";
-			packageProductDependencies = (
-			);
-			productName = "FootballGPS Watch AppUITests";
-			productReference = 21A4CBA72EE8EBAE0004C8F0 /* FootballGPS Watch AppUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -324,9 +287,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2610;
+				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2610;
 				TargetAttributes = {
+					215786B12F10F08300E3541D = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					21A4CB6A2EE8EBAA0004C8F0 = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
@@ -337,17 +303,6 @@
 					21A4CB812EE8EBAD0004C8F0 = {
 						CreatedOnToolsVersion = 26.1.1;
 						TestTargetID = 21A4CB6A2EE8EBAA0004C8F0;
-					};
-					21A4CB8D2EE8EBAD0004C8F0 = {
-						CreatedOnToolsVersion = 26.1.1;
-					};
-					21A4CB9C2EE8EBAE0004C8F0 = {
-						CreatedOnToolsVersion = 26.1.1;
-						TestTargetID = 21A4CB8D2EE8EBAD0004C8F0;
-					};
-					21A4CBA62EE8EBAE0004C8F0 = {
-						CreatedOnToolsVersion = 26.1.1;
-						TestTargetID = 21A4CB8D2EE8EBAD0004C8F0;
 					};
 				};
 			};
@@ -368,14 +323,19 @@
 				21A4CB6A2EE8EBAA0004C8F0 /* FootballGPS */,
 				21A4CB772EE8EBAD0004C8F0 /* FootballGPSTests */,
 				21A4CB812EE8EBAD0004C8F0 /* FootballGPSUITests */,
-				21A4CB8D2EE8EBAD0004C8F0 /* FootballGPS Watch App */,
-				21A4CB9C2EE8EBAE0004C8F0 /* FootballGPS Watch AppTests */,
-				21A4CBA62EE8EBAE0004C8F0 /* FootballGPS Watch AppUITests */,
+				215786B12F10F08300E3541D /* FootballGPS Watch App */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		215786B02F10F08300E3541D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		21A4CB692EE8EBAA0004C8F0 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -397,30 +357,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		21A4CB8C2EE8EBAD0004C8F0 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		21A4CB9B2EE8EBAE0004C8F0 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		21A4CBA52EE8EBAE0004C8F0 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		215786AE2F10F08300E3541D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		21A4CB672EE8EBAA0004C8F0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -442,27 +388,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		21A4CB8A2EE8EBAD0004C8F0 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		21A4CB992EE8EBAE0004C8F0 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		21A4CBA32EE8EBAE0004C8F0 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -476,24 +401,95 @@
 			target = 21A4CB6A2EE8EBAA0004C8F0 /* FootballGPS */;
 			targetProxy = 21A4CB832EE8EBAD0004C8F0 /* PBXContainerItemProxy */;
 		};
-		21A4CB912EE8EBAD0004C8F0 /* PBXTargetDependency */ = {
+		21CC99D12F161A9D00963099 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 21A4CB8D2EE8EBAD0004C8F0 /* FootballGPS Watch App */;
-			targetProxy = 21A4CB902EE8EBAD0004C8F0 /* PBXContainerItemProxy */;
-		};
-		21A4CB9F2EE8EBAE0004C8F0 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 21A4CB8D2EE8EBAD0004C8F0 /* FootballGPS Watch App */;
-			targetProxy = 21A4CB9E2EE8EBAE0004C8F0 /* PBXContainerItemProxy */;
-		};
-		21A4CBA92EE8EBAE0004C8F0 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 21A4CB8D2EE8EBAD0004C8F0 /* FootballGPS Watch App */;
-			targetProxy = 21A4CBA82EE8EBAE0004C8F0 /* PBXContainerItemProxy */;
+			target = 215786B12F10F08300E3541D /* FootballGPS Watch App */;
+			targetProxy = 21CC99D02F161A9D00963099 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		215786BE2F10F08500E3541D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "FootballGPS Watch App/FootballGPS Watch App.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WCQBY65V5J;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "FootballGPS-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "FootballGPS Watch App";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "ワークアウトデータを記録するためにHealthKitを使用します";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトデータを保存するためにHealthKitを使用します";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "サッカー練習中のGPSトラッキングに位置情報を使用します";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.KitakaruizawaDesigin.FootballGPS;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		215786BF2F10F08500E3541D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "FootballGPS Watch App/FootballGPS Watch App.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WCQBY65V5J;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "FootballGPS-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "FootballGPS Watch App";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "ワークアウトデータを記録するためにHealthKitを使用します";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトデータを保存するためにHealthKitを使用します";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "サッカー練習中のGPSトラッキングに位置情報を使用します";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.KitakaruizawaDesigin.FootballGPS;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
 		21A4CBAF2EE8EBAE0004C8F0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -608,87 +604,28 @@
 			};
 			name = Release;
 		};
-		21A4CBB22EE8EBAE0004C8F0 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = FootballGPS;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.KitakaruizawaDesigin.FootballGPS;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS.watchkitapp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 26.1;
-			};
-			name = Debug;
-		};
-		21A4CBB32EE8EBAE0004C8F0 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = FootballGPS;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.KitakaruizawaDesigin.FootballGPS;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS.watchkitapp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				VALIDATE_PRODUCT = YES;
-				WATCHOS_DEPLOYMENT_TARGET = 26.1;
-			};
-			name = Release;
-		};
 		21A4CBB62EE8EBAE0004C8F0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WCQBY65V5J;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FootballGPS/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = FootballGPS;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "ワークアウトデータを記録するためにHealthKitを使用します";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトデータを保存するためにHealthKitを使用します";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "サッカー練習中のGPSトラッキングに位置情報を使用します";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -696,6 +633,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -712,17 +650,23 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WCQBY65V5J;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FootballGPS/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = FootballGPS;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "ワークアウトデータを記録するためにHealthKitを使用します";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトデータを保存するためにHealthKitを使用します";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "サッカー練習中のGPSトラッキングに位置情報を使用します";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -730,6 +674,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -830,111 +775,23 @@
 			};
 			name = Release;
 		};
-		21A4CBBF2EE8EBAE0004C8F0 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.KitakaruizawaDesigin.FootballGPS-Watch-AppTests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = watchos;
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FootballGPS Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/FootballGPS Watch App";
-				WATCHOS_DEPLOYMENT_TARGET = 26.1;
-			};
-			name = Debug;
-		};
-		21A4CBC02EE8EBAE0004C8F0 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.KitakaruizawaDesigin.FootballGPS-Watch-AppTests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = watchos;
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FootballGPS Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/FootballGPS Watch App";
-				VALIDATE_PRODUCT = YES;
-				WATCHOS_DEPLOYMENT_TARGET = 26.1;
-			};
-			name = Release;
-		};
-		21A4CBC22EE8EBAE0004C8F0 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.KitakaruizawaDesigin.FootballGPS-Watch-AppUITests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = watchos;
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				TEST_TARGET_NAME = "FootballGPS Watch App";
-				WATCHOS_DEPLOYMENT_TARGET = 26.1;
-			};
-			name = Debug;
-		};
-		21A4CBC32EE8EBAE0004C8F0 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.KitakaruizawaDesigin.FootballGPS-Watch-AppUITests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = watchos;
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				TEST_TARGET_NAME = "FootballGPS Watch App";
-				VALIDATE_PRODUCT = YES;
-				WATCHOS_DEPLOYMENT_TARGET = 26.1;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		215786BD2F10F08500E3541D /* Build configuration list for PBXNativeTarget "FootballGPS Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				215786BE2F10F08500E3541D /* Debug */,
+				215786BF2F10F08500E3541D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		21A4CB662EE8EBAA0004C8F0 /* Build configuration list for PBXProject "FootballGPS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				21A4CBAF2EE8EBAE0004C8F0 /* Debug */,
 				21A4CBB02EE8EBAE0004C8F0 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		21A4CBB12EE8EBAE0004C8F0 /* Build configuration list for PBXNativeTarget "FootballGPS Watch App" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				21A4CBB22EE8EBAE0004C8F0 /* Debug */,
-				21A4CBB32EE8EBAE0004C8F0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -962,24 +819,6 @@
 			buildConfigurations = (
 				21A4CBBC2EE8EBAE0004C8F0 /* Debug */,
 				21A4CBBD2EE8EBAE0004C8F0 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		21A4CBBE2EE8EBAE0004C8F0 /* Build configuration list for PBXNativeTarget "FootballGPS Watch AppTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				21A4CBBF2EE8EBAE0004C8F0 /* Debug */,
-				21A4CBC02EE8EBAE0004C8F0 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		21A4CBC12EE8EBAE0004C8F0 /* Build configuration list for PBXNativeTarget "FootballGPS Watch AppUITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				21A4CBC22EE8EBAE0004C8F0 /* Debug */,
-				21A4CBC32EE8EBAE0004C8F0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
