@@ -13,47 +13,63 @@ struct FieldPositioningView: View {
     let gpsData: GPSData
     let field: Field
     let isFlipped: Bool
-    
+    let currentPointIndex: Int
+
     var body: some View {
         GeometryReader { geometry in
             let (drawWidth, drawHeight) = fieldDrawSize(in: geometry.size)
+            let allPoints = convertedPoints(in: geometry.size)
             ZStack {
                 // フィールド背景
                 FieldBackgroundView()
                     .frame(width: drawWidth + 40, height: drawHeight + 40)
 
-                // GPS軌跡
-                if let path = createPath(in: geometry.size) {
+                // GPS軌跡（全軌跡を常時表示）
+                if let path = createPath(points: allPoints) {
                     path
                         .stroke(Color.blue, lineWidth: 2)
                 }
-                
+
                 // スタート地点
-                if let firstPoint = convertedPoints(in: geometry.size).first {
+                if let firstPoint = allPoints.first {
                     Circle()
                         .fill(Color.green)
                         .frame(width: 12, height: 12)
                         .position(firstPoint)
-                    
+
                     Text("START")
                         .font(.caption2)
                         .fontWeight(.bold)
                         .foregroundStyle(.green)
                         .position(x: firstPoint.x, y: firstPoint.y - 15)
                 }
-                
+
                 // ゴール地点
-                if let lastPoint = convertedPoints(in: geometry.size).last {
+                if let lastPoint = allPoints.last {
                     Circle()
                         .fill(Color.red)
                         .frame(width: 12, height: 12)
                         .position(lastPoint)
-                    
+
                     Text("END")
                         .font(.caption2)
                         .fontWeight(.bold)
                         .foregroundStyle(.red)
                         .position(x: lastPoint.x, y: lastPoint.y - 15)
+                }
+
+                // 選手ドット（再生位置）
+                if !allPoints.isEmpty {
+                    let dotCenter = allPoints[min(currentPointIndex, allPoints.count - 1)]
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 18, height: 18)
+                        .shadow(color: .black.opacity(0.25), radius: 3, x: 0, y: 1)
+                        .position(dotCenter)
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 12, height: 12)
+                        .position(dotCenter)
                 }
             }
             .background(Color(.systemBackground))
@@ -126,18 +142,13 @@ struct FieldPositioningView: View {
         return (drawWidth, drawHeight)
     }
 
-    /// パスを作成
-    private func createPath(in size: CGSize) -> Path? {
-        let points = convertedPoints(in: size)
+    private func createPath(points: [CGPoint]) -> Path? {
         guard !points.isEmpty else { return nil }
-        
         var path = Path()
         path.move(to: points[0])
-        
         for point in points.dropFirst() {
             path.addLine(to: point)
         }
-        
         return path
     }
 }
@@ -227,7 +238,8 @@ struct FieldLinesView: Shape {
     FieldPositioningView(
         gpsData: MockData.generateMockGPSData(sessionId: "preview"),
         field: MockData.mockField,
-        isFlipped: false
+        isFlipped: false,
+        currentPointIndex: 0
     )
     .frame(height: 400)
 }

@@ -6,6 +6,25 @@
 //
 
 import SwiftUI
+import Combine
+
+enum PlaybackSpeed: Double, CaseIterable {
+    case x1  = 1.0
+    case x2  = 2.0
+    case x4  = 4.0
+    case x8  = 8.0
+    case x16 = 16.0
+
+    var label: String {
+        switch self {
+        case .x1:  return "1x"
+        case .x2:  return "2x"
+        case .x4:  return "4x"
+        case .x8:  return "8x"
+        case .x16: return "16x"
+        }
+    }
+}
 
 struct SessionDetailView: View {
     let session: TrainingSession
@@ -16,6 +35,14 @@ struct SessionDetailView: View {
     @State private var isFlipped: Bool
     @ObservedObject private var fieldManager = FieldManager.shared
     @ObservedObject private var dataManager = SessionDataManager.shared
+
+    // 再生コントロール
+    @State private var isPlaying = false
+    @State private var currentTime: TimeInterval = 0
+    @State private var playbackSpeed: PlaybackSpeed = .x8
+    @State private var isDraggingSlider = false
+    @Environment(\.scenePhase) private var scenePhase
+    private let timer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
     
     init(session: TrainingSession, gpsData: GPSData) {
         self.session = session
@@ -27,6 +54,29 @@ struct SessionDetailView: View {
     private var currentField: Field? {
         guard let id = selectedFieldId else { return nil }
         return fieldManager.getField(by: id)
+    }
+
+    private var totalDuration: TimeInterval {
+        guard let first = gpsData.points.first,
+              let last = gpsData.points.last else { return 0 }
+        return last.timestamp.timeIntervalSince(first.timestamp)
+    }
+
+    private var currentPointIndex: Int {
+        guard !gpsData.points.isEmpty,
+              let firstTimestamp = gpsData.points.first?.timestamp else { return 0 }
+        var lo = 0
+        var hi = gpsData.points.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            let elapsed = gpsData.points[mid].timestamp.timeIntervalSince(firstTimestamp)
+            if elapsed <= currentTime {
+                lo = mid
+            } else {
+                hi = mid - 1
+            }
+        }
+        return lo
     }
     
     var body: some View {
@@ -187,15 +237,35 @@ struct SessionDetailView: View {
     
     private func positioningView(field: Field) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            FieldPositioningView(gpsData: gpsData, field: field, isFlipped: isFlipped)
-                .frame(height: 600)
-            
+            FieldPositioningView(
+                gpsData: gpsData,
+                field: field,
+                isFlipped: isFlipped,
+                currentPointIndex: currentPointIndex
+            )
+            .frame(height: 600)
+
+            playbackControlsView
+
             flipButton
-            
-            Text("青い線が移動軌跡を表示しています")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
+        }
+        .onAppear {
+            isPlaying = false
+            currentTime = 0
+        }
+        .onDisappear {
+            isPlaying = false
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { isPlaying = false }
+        }
+        .onReceive(timer) { _ in
+            guard isPlaying && !isDraggingSlider && totalDuration > 0 else { return }
+            currentTime += 0.05 * playbackSpeed.rawValue
+            if currentTime >= totalDuration {
+                currentTime = 0
+                isPlaying = false
+            }
         }
     }
     
@@ -215,8 +285,118 @@ struct SessionDetailView: View {
         }
     }
     
+    // MARK: - Playback Controls
+
+    private var playbackControlsView: some View {
+        VStack(spacing: 8) {
+            // 行A: 時刻表示 + 速度メニュー
+            HStack {
+                Text("\(formatPlaybackTime(currentTime)) / \(formatPlaybackTime(totalDuration))")
+                    .font(.caption)
+                    .monospacedDigit()
+
+                Spacer()
+
+                Menu {
+                    ForEach(PlaybackSpeed.allCases, id: \.self) { speed in
+                        Button {
+                            playbackSpeed = speed
+                        } label: {
+                            if speed == playbackSpeed {
+                                Label(speed.label, systemImage: "checkmark")
+                            } else {
+                                Text(speed.label)
+                            }
+                        }
+                    }
+                } label: {
+                    Text(playbackSpeed.label)
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color(.systemGray5))
+                        .clipShape(Capsule())
+                }
+            }
+
+            // 行B: スライダー
+            Slider(
+                value: Binding(
+                    get: { totalDuration > 0 ? currentTime / totalDuration : 0 },
+                    set: { currentTime = $0 * totalDuration }
+                ),
+                in: 0...1
+            ) { editing in
+                isDraggingSlider = editing
+            }
+            .tint(.blue)
+            .disabled(totalDuration == 0)
+
+            // 行C: 再生ボタン群
+            HStack(spacing: 0) {
+                Button {
+                    currentTime = 0
+                } label: {
+                    Image(systemName: "backward.end.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    currentTime = max(0, currentTime - 10)
+                } label: {
+                    Image(systemName: "gobackward.10")
+                        .font(.title2)
+                        .foregroundStyle(.primary)
+                }
+
+                Spacer()
+
+                Button {
+                    isPlaying.toggle()
+                } label: {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title)
+                        .foregroundStyle(.blue)
+                }
+
+                Spacer()
+
+                Button {
+                    currentTime = min(totalDuration, currentTime + 10)
+                } label: {
+                    Image(systemName: "goforward.10")
+                        .font(.title2)
+                        .foregroundStyle(.primary)
+                }
+
+                Spacer()
+
+                Button {
+                    currentTime = totalDuration
+                    isPlaying = false
+                } label: {
+                    Image(systemName: "forward.end.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+        .padding(.horizontal)
+    }
+
+    private func formatPlaybackTime(_ time: TimeInterval) -> String {
+        String(format: "%02d:%02d", Int(time) / 60, Int(time) % 60)
+    }
+
     // MARK: - Flip Button
-    
+
     private var flipButton: some View {
         Button {
             isFlipped.toggle()
