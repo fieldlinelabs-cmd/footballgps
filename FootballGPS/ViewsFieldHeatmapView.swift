@@ -14,10 +14,10 @@ struct FieldHeatmapView: View {
     let field: Field
     let isFlipped: Bool
     
-    // ヒートマップのグリッドサイズ
+    // ヒートマップのグリッドサイズ（倍密化: 約2.5m/セル）
     // 90度回転のため、行と列を入れ替える
-    private let gridRows = 14 // 横方向（幅）
-    private let gridCols = 20 // 縦方向（長さ）
+    private let gridRows = 28 // 横方向（幅）
+    private let gridCols = 40 // 縦方向（長さ）
     
     var body: some View {
         GeometryReader { geometry in
@@ -35,6 +35,7 @@ struct FieldHeatmapView: View {
                     size: geometry.size,
                     field: field
                 )
+                .blur(radius: 6)
             }
             .background(Color(.systemBackground))
             .cornerRadius(12)
@@ -78,19 +79,32 @@ struct FieldHeatmapView: View {
             // 90度回転のため、x と y を入れ替える
             let normalizedX = fy / field.dimensions.length // y → 横方向
             let normalizedY = fx / field.dimensions.width  // x → 縦方向
-            
+
             let col = Int(normalizedX * Double(gridCols)).clamped(to: 0..<gridCols)
             let row = Int(normalizedY * Double(gridRows)).clamped(to: 0..<gridRows)
-            
-            grid[row][col] += 1.0
+
+            // ガウシアンカーネルで周辺セルにも拡散
+            let sigma = 1.5
+            let kernelRadius = 4
+            for dr in -kernelRadius...kernelRadius {
+                for dc in -kernelRadius...kernelRadius {
+                    let r = row + dr
+                    let c = col + dc
+                    guard r >= 0 && r < gridRows && c >= 0 && c < gridCols else { continue }
+                    let distance = sqrt(Double(dr * dr + dc * dc))
+                    let weight = exp(-(distance * distance) / (2.0 * sigma * sigma))
+                    grid[r][c] += weight
+                }
+            }
         }
-        
-        // 正規化（最大値を1.0に）
+
+        // 対数正規化（最大値を1.0に）
         let maxValue = grid.flatMap { $0 }.max() ?? 1.0
         if maxValue > 0 {
+            let logMax = log(maxValue + 1)
             for row in 0..<gridRows {
                 for col in 0..<gridCols {
-                    grid[row][col] /= maxValue
+                    grid[row][col] = log(grid[row][col] + 1) / logMax
                 }
             }
         }
@@ -151,21 +165,21 @@ struct HeatmapGridView: View {
         }
     }
     
-    /// ヒートマップの色を計算
+    /// ヒートマップの色を計算（青→緑→黄→赤、強度に比例した不透明度）
     private func heatmapColor(for intensity: Double) -> Color {
-        // 青 → 緑 → 黄 → 赤
+        let opacity = intensity * 0.85
         if intensity < 0.25 {
             let t = intensity / 0.25
-            return Color(red: 0, green: 0, blue: 1 - t * 0.5).opacity(0.3 + intensity * 0.4)
+            return Color(red: 0, green: 0, blue: 1 - t * 0.5).opacity(opacity)
         } else if intensity < 0.5 {
             let t = (intensity - 0.25) / 0.25
-            return Color(red: 0, green: t, blue: 0.5).opacity(0.4 + intensity * 0.3)
+            return Color(red: 0, green: t, blue: 0.5).opacity(opacity)
         } else if intensity < 0.75 {
             let t = (intensity - 0.5) / 0.25
-            return Color(red: t, green: 1, blue: 0).opacity(0.5 + intensity * 0.3)
+            return Color(red: t, green: 1, blue: 0).opacity(opacity)
         } else {
             let t = (intensity - 0.75) / 0.25
-            return Color(red: 1, green: 1 - t, blue: 0).opacity(0.6 + intensity * 0.4)
+            return Color(red: 1, green: 1 - t, blue: 0).opacity(opacity)
         }
     }
 }
