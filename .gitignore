@@ -1,0 +1,24 @@
+# SSH keys
+granpa11
+granpa11.pub
+
+# Gemini / AI generated temp files
+docs/gemini-code-*.txt
+
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
