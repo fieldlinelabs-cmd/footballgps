@@ -64,6 +64,12 @@ struct SessionsListView: View {
                             SessionRow(session: session)
                         }
                     }
+                    .onDelete { indexSet in
+                        let sessions = groupedSessions[date] ?? []
+                        indexSet.forEach { i in
+                            dataManager.deleteSession(sessions[i])
+                        }
+                    }
                 } header: {
                     Text(formatSectionDate(date))
                 }
