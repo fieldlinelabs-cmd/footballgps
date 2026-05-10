@@ -10,6 +10,7 @@ import HealthKit
 import CoreLocation
 import Combine
 import WatchConnectivity
+import WatchKit
 
 /// Apple Watchでワークアウト（GPS記録）を管理するクラス
 @MainActor
@@ -29,6 +30,8 @@ class WorkoutManager: NSObject, ObservableObject {
     @Published var activeCalories: Double = 0 // kcal
     @Published var sprintCount: Int = 0
     @Published var zoneDistances: [Double] = [0, 0, 0, 0, 0] // Zone1-5 (m)
+
+    @Published var startPointConfirmed: Bool = false
 
     // GPS記録データ（デバッグ用に公開）
     @Published var gpsPoints: [GPSPoint] = []
@@ -343,6 +346,7 @@ class WorkoutManager: NSObject, ObservableObject {
         isInSprint = false
         lastSprintEndTime = nil
         previousLocation = nil
+        startPointConfirmed = false
     }
     
     // MARK: - Timer
@@ -502,6 +506,12 @@ extension WorkoutManager: CLLocationManagerDelegate {
             self.previousLocation = location
 
             guard isAccurate && isNotJump else { return }
+
+            // 初回点確定: Start地点確定フィードバック
+            if self.gpsPoints.isEmpty {
+                WKInterfaceDevice.current().play(.success)
+                self.startPointConfirmed = true
+            }
 
             // 直前の承認済み位置を取得してから追加
             let prevAcceptedLocation = self.locations.last

@@ -111,11 +111,28 @@ struct RunningView: View {
     @Binding var showingSummary: Bool
     @State private var showingEndConfirmation = false
     @State private var showingGPSDebug = false
-    
+    @State private var showStartConfirmed = false
+
     var body: some View {
         // スクロール領域 (Digital Crown 対応)
         ScrollView {
             VStack(spacing: 10) {
+                // GPS状態フィードバック（VStack最上部）
+                if !workoutManager.startPointConfirmed {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                        Text("GPS安定中...")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if showStartConfirmed {
+                    Text("Start確定！")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.green)
+                }
+
                 // 経過時間
                 Text(formatTime(workoutManager.elapsedTime))
                     .font(.system(size: 40, weight: .bold, design: .rounded))
@@ -208,8 +225,17 @@ struct RunningView: View {
         .sheet(isPresented: $showingGPSDebug) {
             GPSDebugView(gpsPoints: workoutManager.gpsPoints)
         }
+        .onChange(of: workoutManager.startPointConfirmed) { _, confirmed in
+            if confirmed {
+                showStartConfirmed = true
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    showStartConfirmed = false
+                }
+            }
+        }
     }
-    
+
     private func formatTime(_ timeInterval: TimeInterval) -> String {
         let hours = Int(timeInterval) / 3600
         let minutes = Int(timeInterval) / 60 % 60
