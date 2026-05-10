@@ -43,7 +43,7 @@ class SessionDataManager: ObservableObject {
 
     // MARK: - Save/Load Sessions
 
-    /// セッションを保存
+    /// セッションを保存（sprintCount は GPS データから再計算して上書きする）
     func saveSession(_ session: TrainingSession, gpsData: GPSData) {
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index] = session
@@ -53,11 +53,64 @@ class SessionDataManager: ObservableObject {
         sessions.sort { $0.date > $1.date }
 
         cacheGPSData(gpsData, for: session.id)
-        persistSessions()
         persistGPSData(gpsData)
 
-        print("✅ セッション保存完了: \(session.name)")
+        // GPS データからスプリント回数を計算して上書き
+        let count = SessionDataManager.calculateSprintCount(from: gpsData)
+        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            sessions[index].sprintCount = count
+        }
+        persistSessions()
+
+        print("✅ セッション保存完了: \(session.name), スプリント: \(count)回")
         print("📊 総セッション数: \(sessions.count)")
+    }
+
+    /// GPS データからスプリント回数を計算する
+    static func calculateSprintCount(from gpsData: GPSData) -> Int {
+        let sprintThreshold: Double = 5.5
+        let sprintEndThreshold: Double = 4.5
+        let minSprintDuration: TimeInterval = 2.0
+        let minSprintInterval: TimeInterval = 5.0
+
+        var count = 0
+        var isInSprint = false
+        var isInSprintCandidate = false
+        var candidateStartTime: Date? = nil
+        var lastSprintEndTime: Date? = nil
+
+        for point in gpsData.points {
+            let speed = point.speed
+            let timestamp = point.timestamp
+
+            if isInSprint {
+                if speed < sprintEndThreshold {
+                    isInSprint = false
+                    lastSprintEndTime = timestamp
+                }
+            } else if isInSprintCandidate {
+                if speed < sprintEndThreshold {
+                    isInSprintCandidate = false
+                    candidateStartTime = nil
+                } else if let start = candidateStartTime,
+                          timestamp.timeIntervalSince(start) >= minSprintDuration {
+                    isInSprint = true
+                    isInSprintCandidate = false
+                    count += 1
+                }
+            } else {
+                if speed >= sprintThreshold {
+                    let canStart = lastSprintEndTime == nil ||
+                        timestamp.timeIntervalSince(lastSprintEndTime!) >= minSprintInterval
+                    if canStart {
+                        isInSprintCandidate = true
+                        candidateStartTime = timestamp
+                    }
+                }
+            }
+        }
+
+        return count
     }
 
     /// GPSデータを取得

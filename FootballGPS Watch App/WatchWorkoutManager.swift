@@ -28,7 +28,6 @@ class WorkoutManager: NSObject, ObservableObject {
     
     @Published var heartRate: Double = 0 // BPM
     @Published var activeCalories: Double = 0 // kcal
-    @Published var sprintCount: Int = 0
     @Published var zoneDistances: [Double] = [0, 0, 0, 0, 0] // Zone1-5 (m)
 
     @Published var startPointConfirmed: Bool = false
@@ -49,12 +48,6 @@ class WorkoutManager: NSObject, ObservableObject {
     private var timer: Timer?
     private var totalPausedDuration: TimeInterval = 0
     private var pauseStartDate: Date?
-
-    // スプリント検出用
-    private var isInSprintCandidate = false
-    private var sprintCandidateStartTime: Date?
-    private var isInSprint = false
-    private var lastSprintEndTime: Date?
 
     // GPS 安定待ちフィルタ用（破棄した点も含む直前の位置）
     private var previousLocation: CLLocation?
@@ -315,7 +308,7 @@ class WorkoutManager: NSObject, ObservableObject {
             totalDistance: distance,
             maxSpeed: maxSpeed,
             avgSpeed: avgSpeed,
-            sprintCount: sprintCount
+            sprintCount: nil
         )
         
         let gpsData = GPSData(
@@ -334,17 +327,12 @@ class WorkoutManager: NSObject, ObservableObject {
         maxSpeed = 0
         heartRate = 0
         activeCalories = 0
-        sprintCount = 0
         zoneDistances = [0, 0, 0, 0, 0]
         locations.removeAll()
         gpsPoints.removeAll()
         startDate = nil
         totalPausedDuration = 0
         pauseStartDate = nil
-        isInSprintCandidate = false
-        sprintCandidateStartTime = nil
-        isInSprint = false
-        lastSprintEndTime = nil
         previousLocation = nil
         startPointConfirmed = false
     }
@@ -371,9 +359,8 @@ class WorkoutManager: NSObject, ObservableObject {
 
     // MARK: - Speed Processing
 
-    /// 速度ゾーン別距離加算とスプリント検出
+    /// 速度ゾーン別距離加算
     private func processSpeedUpdate(speed: Double, timestamp: Date, distanceIncrement: Double) {
-        // 速度ゾーン別距離の加算
         let zoneIndex: Int
         switch speed {
         case ..<2.0:    zoneIndex = 0 // 静止/歩行
@@ -383,38 +370,6 @@ class WorkoutManager: NSObject, ObservableObject {
         default:        zoneIndex = 4 // スプリント
         }
         zoneDistances[zoneIndex] += distanceIncrement
-
-        // スプリント検出
-        let sprintThreshold: Double = 5.5
-        let sprintEndThreshold: Double = 4.5
-        let minSprintDuration: TimeInterval = 2.0
-        let minSprintInterval: TimeInterval = 5.0
-
-        if isInSprint {
-            if speed < sprintEndThreshold {
-                isInSprint = false
-                isInSprintCandidate = false
-                sprintCount += 1
-                lastSprintEndTime = timestamp
-            }
-        } else if isInSprintCandidate {
-            if speed < sprintEndThreshold {
-                isInSprintCandidate = false
-                sprintCandidateStartTime = nil
-            } else if let candidateStart = sprintCandidateStartTime,
-                      timestamp.timeIntervalSince(candidateStart) >= minSprintDuration {
-                isInSprint = true
-            }
-        } else {
-            if speed >= sprintThreshold {
-                let canStart = lastSprintEndTime == nil ||
-                    timestamp.timeIntervalSince(lastSprintEndTime!) >= minSprintInterval
-                if canStart {
-                    isInSprintCandidate = true
-                    sprintCandidateStartTime = timestamp
-                }
-            }
-        }
     }
 }
 
