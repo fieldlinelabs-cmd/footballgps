@@ -60,16 +60,16 @@ struct CalibrationSessionView: View {
     private enum Phase {
         case idle
         case recording
-        case pickingTag([CalibrationSample])
         case done(String)
     }
 
     @State private var phase: Phase = .idle
 
-    private let tags = ["急停止", "急加速", "切り返し", "ターン", "反転", "バックペダル"]
-
     var body: some View {
         phaseView
+            .onAppear {
+                WatchConnectivityService.shared.cleanupCalibrationTempFiles()
+            }
     }
 
     @ViewBuilder
@@ -79,8 +79,6 @@ struct CalibrationSessionView: View {
             idleView
         case .recording:
             recordingView
-        case .pickingTag(let samples):
-            tagPickerView(samples: samples)
         case .done(let message):
             doneView(message: message)
         }
@@ -95,7 +93,7 @@ struct CalibrationSessionView: View {
                 .foregroundStyle(.blue)
             Text("キャリブレーション")
                 .font(.headline)
-            Text("動作後に種類を選択します")
+            Text("動作を行い終了ボタンを押します")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -122,33 +120,12 @@ struct CalibrationSessionView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Button("終了") {
-                let captured = recorder.stopRecording()
-                phase = .pickingTag(captured)
+                stopAndTransfer()
             }
             .buttonStyle(.bordered)
             .tint(.red)
         }
         .padding()
-    }
-
-    private func tagPickerView(samples: [CalibrationSample]) -> some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                Text("動作を選択")
-                    .font(.headline)
-                    .padding(.bottom, 4)
-                ForEach(tags, id: \.self) { tag in
-                    Button(tag) {
-                        transferCSV(samples: samples, tag: tag)
-                    }
-                    .buttonStyle(.bordered)
-                }
-                Button("キャンセル") { dismiss() }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-            }
-            .padding()
-        }
     }
 
     private func doneView(message: String) -> some View {
@@ -167,19 +144,12 @@ struct CalibrationSessionView: View {
 
     // MARK: - Helpers
 
-    private func transferCSV(samples: [CalibrationSample], tag: String) {
-        let tagged = samples.map {
-            CalibrationSample(
-                timestamp: $0.timestamp, tag: tag,
-                accX: $0.accX, accY: $0.accY, accZ: $0.accZ,
-                gyroX: $0.gyroX, gyroY: $0.gyroY, gyroZ: $0.gyroZ,
-                speed: $0.speed
-            )
-        }
-        let csv = buildCSV(tagged)
+    private func stopAndTransfer() {
+        let samples = recorder.stopRecording()
+        let csv = buildCSV(samples)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
-        let filename = "calib_\(tag)_\(formatter.string(from: Date())).csv"
+        let filename = "calib_\(formatter.string(from: Date())).csv"
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(filename)
         do {
@@ -192,14 +162,12 @@ struct CalibrationSessionView: View {
     }
 
     private func buildCSV(_ samples: [CalibrationSample]) -> String {
-        var lines = ["timestamp,tag,accX,accY,accZ,gyroX,gyroY,gyroZ,speed"]
+        var lines = ["timestamp,accX,accY,accZ"]
         for s in samples {
             lines.append(String(
-                format: "%.4f,%@,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.4f",
-                s.timestamp, s.tag,
-                s.accX, s.accY, s.accZ,
-                s.gyroX, s.gyroY, s.gyroZ,
-                s.speed
+                format: "%.4f,%.6f,%.6f,%.6f",
+                s.timestamp,
+                s.accX, s.accY, s.accZ
             ))
         }
         return lines.joined(separator: "\n")
