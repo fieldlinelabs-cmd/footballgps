@@ -78,6 +78,21 @@ struct Team: Identifiable, Codable {
     }
 }
 
+/// 性別
+enum Gender: String, Codable, CaseIterable {
+    case male = "male"
+    case female = "female"
+    case other = "other"
+
+    var displayName: String {
+        switch self {
+        case .male:   return "男性"
+        case .female: return "女性"
+        case .other:  return "その他"
+        }
+    }
+}
+
 /// ユーザープロフィール
 struct UserProfile: Identifiable, Codable {
     let id: String // Firebase Auth UID
@@ -85,19 +100,25 @@ struct UserProfile: Identifiable, Codable {
     var email: String?
     var teamIds: [String]
     let createdAt: Date
+    var birthDate: Date?
+    var gender: Gender?
     
     init(
         id: String,
         displayName: String,
         email: String? = nil,
         teamIds: [String] = [],
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        birthDate: Date? = nil,
+        gender: Gender? = nil
     ) {
         self.id = id
         self.displayName = displayName
         self.email = email
         self.teamIds = teamIds
         self.createdAt = createdAt
+        self.birthDate = birthDate
+        self.gender = gender
     }
     
     /// Firestoreとの変換用
@@ -111,6 +132,12 @@ struct UserProfile: Identifiable, Codable {
         
         if let email = email {
             dict["email"] = email
+        }
+        if let birthDate = birthDate {
+            dict["birthDate"] = birthDate.timeIntervalSince1970
+        }
+        if let gender = gender {
+            dict["gender"] = gender.rawValue
         }
         
         return dict

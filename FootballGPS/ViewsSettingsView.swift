@@ -9,29 +9,38 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
+    @ObservedObject private var profileManager = UserProfileManager.shared
 
     var body: some View {
         NavigationStack {
             List {
-                Section {
+                Section("プロフィール") {
                     HStack {
-                        Image(systemName: "person.circle.fill")
-                            .font(.largeTitle)
-                            .foregroundStyle(.blue)
-                        
-                        VStack(alignment: .leading) {
-                            Text(MockData.mockUser.displayName)
-                                .font(.headline)
-                            Text(MockData.mockUser.email ?? "")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.leading, 8)
+                        Text("名前")
+                        Spacer()
+                        TextField("未設定", text: $profileManager.profile.displayName)
+                            .multilineTextAlignment(.trailing)
                     }
-                    .padding(.vertical, 8)
-                } header: {
-                    Text("プロフィール")
+
+                    DatePicker(
+                        "生年月日",
+                        selection: Binding(
+                            get: { profileManager.profile.birthDate ?? Date() },
+                            set: { profileManager.profile.birthDate = $0 }
+                        ),
+                        displayedComponents: .date
+                    )
+
+                    Picker("性別", selection: $profileManager.profile.gender) {
+                        Text("未設定").tag(Gender?.none)
+                        ForEach(Gender.allCases, id: \.self) { g in
+                            Text(g.displayName).tag(Gender?.some(g))
+                        }
+                    }
                 }
+                .onChange(of: profileManager.profile.displayName) { _, _ in profileManager.save() }
+                .onChange(of: profileManager.profile.birthDate) { _, _ in profileManager.save() }
+                .onChange(of: profileManager.profile.gender) { _, _ in profileManager.save() }
                 
                 Section {
                     NavigationLink {
