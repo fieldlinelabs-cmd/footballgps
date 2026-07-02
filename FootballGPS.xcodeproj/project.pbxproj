@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2128EA812FEF33F4007DA2B3 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 2128EA802FEF33F4007DA2B3 /* Supabase */; };
 		21CC99CF2F161A9C00963099 /* FootballGPS Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 215786B22F10F08300E3541D /* FootballGPS Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -136,6 +137,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2128EA812FEF33F4007DA2B3 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,6 +231,7 @@
 			);
 			name = FootballGPS;
 			packageProductDependencies = (
+				2128EA802FEF33F4007DA2B3 /* Supabase */,
 			);
 			productName = FootballGPS;
 			productReference = 21A4CB6B2EE8EBAA0004C8F0 /* FootballGPS.app */;
@@ -315,6 +318,9 @@
 			);
 			mainGroup = 21A4CB622EE8EBAA0004C8F0;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				2128EA7F2FEF30DE007DA2B3 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 21A4CB6C2EE8EBAA0004C8F0 /* Products */;
 			projectDirPath = "";
@@ -418,7 +424,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = WCQBY65V5J;
+				DEVELOPMENT_TEAM = 25J8Y55P5B;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "FootballGPS-Watch-App-Info.plist";
@@ -427,13 +433,13 @@
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトデータを保存するためにHealthKitを使用します";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "サッカー練習中のGPSトラッキングに位置情報を使用します";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.KitakaruizawaDesigin.FootballGPS;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.fieldline.footballgps;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS.watchkitapp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fieldline.footballgps.watchapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = watchos;
@@ -458,7 +464,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = WCQBY65V5J;
+				DEVELOPMENT_TEAM = 25J8Y55P5B;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "FootballGPS-Watch-App-Info.plist";
@@ -467,13 +473,13 @@
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトデータを保存するためにHealthKitを使用します";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "サッカー練習中のGPSトラッキングに位置情報を使用します";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.KitakaruizawaDesigin.FootballGPS;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.fieldline.footballgps;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS.watchkitapp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fieldline.footballgps.watchapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = watchos;
@@ -612,7 +618,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = WCQBY65V5J;
+				DEVELOPMENT_TEAM = 25J8Y55P5B;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FootballGPS/Info.plist;
@@ -631,7 +637,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fieldline.footballgps;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
@@ -653,7 +659,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = WCQBY65V5J;
+				DEVELOPMENT_TEAM = 25J8Y55P5B;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FootballGPS/Info.plist;
@@ -672,7 +678,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.KitakaruizawaDesigin.FootballGPS;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fieldline.footballgps;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
@@ -824,6 +830,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		2128EA7F2FEF30DE007DA2B3 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		2128EA802FEF33F4007DA2B3 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2128EA7F2FEF30DE007DA2B3 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 21A4CB632EE8EBAA0004C8F0 /* Project object */;
 }

@@ -150,18 +150,34 @@ struct SessionRow: View {
                     value: formatDuration(session.duration),
                     color: .blue
                 )
-                
+
                 StatBadge(
                     icon: "figure.walk",
                     value: formatDistance(session.totalDistance),
                     color: .green
                 )
-                
+
                 StatBadge(
                     icon: "speedometer",
                     value: String(format: "%.1f m/s", session.maxSpeed),
                     color: .orange
                 )
+
+                if let bpm = session.heartRate, bpm > 0 {
+                    StatBadge(
+                        icon: "heart.fill",
+                        value: String(format: "%.0f bpm", bpm),
+                        color: .red
+                    )
+                }
+
+                if let kcal = session.activeCalories, kcal > 0 {
+                    StatBadge(
+                        icon: "flame.fill",
+                        value: String(format: "%.0f kcal", kcal),
+                        color: .orange
+                    )
+                }
             }
         }
         .padding(.vertical, 4)

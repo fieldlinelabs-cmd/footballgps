@@ -23,6 +23,9 @@ struct FootballGPSApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .task {
+                    try? await SupabaseManager.shared.ensureAuthenticated()
+                }
         }
     }
     

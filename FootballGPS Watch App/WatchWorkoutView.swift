@@ -42,8 +42,6 @@ struct StartView: View {
     @State private var isRequestingPermission = false
     @State private var showError = false
     @State private var errorMessage = ""
-    @State private var showingTestOptions = false
-    
     var body: some View {
         VStack(spacing: 15) {
             Image(systemName: "figure.run")
@@ -87,20 +85,8 @@ struct StartView: View {
             .buttonStyle(.borderedProminent)
             .disabled(isRequestingPermission)
             
-            // デバッグ用テストボタン
-            Button {
-                showingTestOptions = true
-            } label: {
-                Label("テスト送信", systemImage: "paperplane.fill")
-                    .font(.caption)
-            }
-            .buttonStyle(.bordered)
-            .tint(.orange)
         }
         .padding()
-        .sheet(isPresented: $showingTestOptions) {
-            TestDataSendView(workoutManager: workoutManager)
-        }
     }
 }
 
@@ -162,6 +148,22 @@ struct RunningView: View {
                         label: "GPS点",
                         value: "\(workoutManager.gpsPoints.count)",
                         icon: "location.fill"
+                    )
+
+                    StatRow(
+                        label: "心拍",
+                        value: workoutManager.heartRate > 0
+                            ? String(format: "%.0f bpm", workoutManager.heartRate)
+                            : "-- bpm",
+                        icon: "heart.fill"
+                    )
+
+                    StatRow(
+                        label: "消費",
+                        value: workoutManager.activeCalories > 0
+                            ? String(format: "%.0f kcal", workoutManager.activeCalories)
+                            : "-- kcal",
+                        icon: "flame.fill"
                     )
                 }
                 .font(.caption)
@@ -276,63 +278,68 @@ struct SummaryView: View {
     @StateObject private var connectivityService = WatchConnectivityService.shared
     
     var body: some View {
-        VStack(spacing: 10) {
-            // ✅と完了！を横並び
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.green)
-                
-                Text("完了！")
-                    .font(.title3)
-                    .fontWeight(.bold)
-            }
-            
-            // 統計データ（コンパクト）
-            VStack(alignment: .leading, spacing: 4) {
-                SummaryRow(label: "時間", value: formatDuration(workoutManager.elapsedTime))
-                SummaryRow(label: "距離", value: String(format: "%.0f m", workoutManager.distance))
-                SummaryRow(label: "平均", value: String(format: "%.1f m/s", workoutManager.distance / max(workoutManager.elapsedTime, 1)))
-                SummaryRow(label: "最高", value: String(format: "%.1f m/s", workoutManager.maxSpeed))
-                SummaryRow(label: "GPS", value: "\(workoutManager.gpsPoints.count)点")
-            }
-            .font(.caption)
-            .padding(8)
-            .background(Color.gray.opacity(0.2))
-            .cornerRadius(8)
-            
-            // 送信状態（コンパクト）
-            HStack(spacing: 4) {
-                Image(systemName: "applewatch")
-                    .font(.caption2)
-                    .foregroundStyle(connectivityService.isReachable ? .green : .orange)
-                
-                if connectivityService.pendingTransferCount > 0 {
-                    Text("送信待ち")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("iPhoneで確認")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(spacing: 10) {
+                // ✅と完了！を横並び
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.green)
+
+                    Text("完了！")
+                        .font(.title3)
+                        .fontWeight(.bold)
                 }
+
+                // 統計データ（コンパクト）
+                VStack(alignment: .leading, spacing: 4) {
+                    SummaryRow(label: "時間", value: formatDuration(workoutManager.elapsedTime))
+                    SummaryRow(label: "距離", value: String(format: "%.0f m", workoutManager.distance))
+                    SummaryRow(label: "平均", value: String(format: "%.1f m/s", workoutManager.distance / max(workoutManager.elapsedTime, 1)))
+                    SummaryRow(label: "最高", value: String(format: "%.1f m/s", workoutManager.maxSpeed))
+                    SummaryRow(label: "GPS", value: "\(workoutManager.gpsPoints.count)点")
+                    SummaryRow(label: "心拍数", value: workoutManager.heartRate > 0
+                        ? String(format: "%.0f bpm", workoutManager.heartRate) : "--")
+                    SummaryRow(label: "カロリー", value: workoutManager.activeCalories > 0
+                        ? String(format: "%.0f kcal", workoutManager.activeCalories) : "--")
+                }
+                .font(.caption)
+                .padding(8)
+                .background(Color.gray.opacity(0.2))
+                .cornerRadius(8)
+
+                // 送信状態（コンパクト）
+                HStack(spacing: 4) {
+                    Image(systemName: "applewatch")
+                        .font(.caption2)
+                        .foregroundStyle(connectivityService.isReachable ? .green : .orange)
+
+                    if connectivityService.pendingTransferCount > 0 {
+                        Text("送信待ち")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("iPhoneで確認")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // 完了ボタン
+                Button {
+                    workoutManager.isRunning = false
+                    workoutManager.reset()
+                    isPresented = false
+                } label: {
+                    Text("完了")
+                        .font(.body)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            
-            // 完了ボタン
-            Button {
-                // isRunning を false にして開始画面に戻る
-                workoutManager.isRunning = false
-                workoutManager.reset()
-                isPresented = false
-            } label: {
-                Text("完了")
-                    .font(.body)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
         .transition(.move(edge: .bottom))
     }
     

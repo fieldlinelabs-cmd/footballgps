@@ -22,11 +22,6 @@ struct ContentView: View {
                     Label("フィールド", systemImage: "map")
                 }
             
-            TeamView()
-                .tabItem {
-                    Label("チーム", systemImage: "person.3.fill")
-                }
-            
             #if DEBUG
             DebugTestView()
                 .tabItem {
@@ -68,7 +63,7 @@ struct DebugTestView: View {
     @StateObject private var fieldManager = FieldManager.shared
     @State private var showAlert = false
     @State private var alertMessage = ""
-    
+
     var body: some View {
         NavigationStack {
             List {
@@ -108,6 +103,16 @@ struct DebugTestView: View {
                     } label: {
                         Label("GPSログを確認", systemImage: "location.fill")
                     }
+                    NavigationLink {
+                        SprintMeasurementView()
+                    } label: {
+                        Label("計測データ", systemImage: "speedometer")
+                    }
+                    NavigationLink {
+                        CalibrationStatsView()
+                    } label: {
+                        Label("閾値キャリブレーション集計", systemImage: "chart.bar.fill")
+                    }
                 } header: {
                     Text("デバッグツール")
                 }
@@ -139,7 +144,6 @@ struct DebugTestView: View {
         if fieldManager.fields.isEmpty {
             let field = createTestField()
             fieldManager.addField(field)
-            fieldManager.selectField(field.id)
         }
         
         guard let field = fieldManager.fields.first else { return }
@@ -358,7 +362,7 @@ struct GPSMapDebugView: View {
     
     // 使用するフィールド
     private var field: Field? {
-        fieldManager.getSelectedField() ?? fieldManager.fields.first
+        fieldManager.fields.first
     }
     
     init(gpsData: GPSData, sessionName: String) {
@@ -781,6 +785,132 @@ struct FieldOverlayView: View {
             .foregroundColor(.white)
         
         context.draw(text, at: CGPoint(x: point.x, y: point.y + 20))
+    }
+}
+
+// MARK: - Agility Debug View
+
+struct AgilityDebugView: View {
+    private struct FileResult: Identifiable {
+        let id = UUID()
+        let filename: String
+        let events: [SessionDataManager.CalibrationAgilityEvent]
+        let error: String?
+    }
+
+    @State private var results: [FileResult] = []
+
+    var body: some View {
+        List {
+            ForEach(results, id: \.id) { result in
+                Section(header: Text(result.filename)) {
+                    resultContent(result)
+                }
+            }
+        }
+        .overlay {
+            if results.isEmpty {
+                Text("キャリブレーションCSVファイルがありません")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("アジリティイベント検出")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { loadResults() }
+    }
+
+    @ViewBuilder
+    private func resultContent(_ result: FileResult) -> some View {
+        if let error = result.error {
+            Text("❌ \(error)")
+                .foregroundStyle(.red)
+                .font(.caption)
+        } else {
+            HStack {
+                Text("イベント数")
+                Spacer()
+                Text(String(result.events.count) + "回")
+                    .fontWeight(.bold)
+                    .foregroundStyle(result.events.isEmpty ? Color.secondary : Color.green)
+            }
+            ForEach(Array(result.events.enumerated()), id: \.offset) { idx, event in
+                HStack {
+                    Text("イベント \(idx + 1)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("ピーク: \(String(format: "%.2f", event.peakMagnitude))G")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    private func loadResults() {
+        let dir = SessionDataManager.shared.calibrationDirectory
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+        ) else {
+            results = []
+            return
+        }
+
+        let csvFiles = files
+            .filter { $0.pathExtension == "csv" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        results = csvFiles.map { url in
+            let filename = url.lastPathComponent
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+                return FileResult(filename: filename, events: [], error: "ファイル読み込み失敗")
+            }
+            let samples = parseCSV(content)
+            guard !samples.isEmpty else {
+                return FileResult(filename: filename, events: [], error: "サンプルなし")
+            }
+            let events = SessionDataManager.detectAgilityEvents(from: samples)
+            return FileResult(filename: filename, events: events, error: nil)
+        }
+    }
+
+    private func parseCSV(_ content: String) -> [CalibrationSample] {
+        let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
+        guard lines.count > 1 else { return [] }
+        // ヘッダーで新旧フォーマットを判別
+        // 新: timestamp,accX,accY,accZ (4列)
+        // 旧: timestamp,tag,accX,accY,accZ,gyroX,gyroY,gyroZ,speed (9列)
+        let isNewFormat = !lines[0].lowercased().contains("tag")
+        return lines.dropFirst().compactMap { line in
+            let cols = line.components(separatedBy: ",")
+            if isNewFormat {
+                guard cols.count >= 4,
+                      let timestamp = Double(cols[0]),
+                      let accX = Double(cols[1]),
+                      let accY = Double(cols[2]),
+                      let accZ = Double(cols[3]) else { return nil }
+                return CalibrationSample(
+                    timestamp: timestamp, tag: "",
+                    accX: accX, accY: accY, accZ: accZ,
+                    gyroX: 0, gyroY: 0, gyroZ: 0, speed: 0
+                )
+            } else {
+                guard cols.count >= 9,
+                      let timestamp = Double(cols[0]),
+                      let accX = Double(cols[2]),
+                      let accY = Double(cols[3]),
+                      let accZ = Double(cols[4]),
+                      let gyroX = Double(cols[5]),
+                      let gyroY = Double(cols[6]),
+                      let gyroZ = Double(cols[7]),
+                      let speed = Double(cols[8]) else { return nil }
+                return CalibrationSample(
+                    timestamp: timestamp, tag: cols[1],
+                    accX: accX, accY: accY, accZ: accZ,
+                    gyroX: gyroX, gyroY: gyroY, gyroZ: gyroZ,
+                    speed: speed
+                )
+            }
+        }
     }
 }
 #endif

@@ -319,12 +319,22 @@ struct Field: Identifiable, Codable {
             ))
         }
         
-        return FieldCorners(
-            topLeft:     corner(us: -1, vs: -1),
-            topRight:    corner(us: +1, vs: -1),
-            bottomRight: corner(us: +1, vs: +1),
-            bottomLeft:  corner(us: -1, vs: +1)
-        )
+        if halfL < halfW {
+            // TL/TR がゴールライン上に置かれた場合：TR と BL を入れ替えて長辺を保証
+            return FieldCorners(
+                topLeft:     corner(us: -1, vs: -1),
+                topRight:    corner(us: -1, vs: +1),
+                bottomRight: corner(us: +1, vs: +1),
+                bottomLeft:  corner(us: +1, vs: -1)
+            )
+        } else {
+            return FieldCorners(
+                topLeft:     corner(us: -1, vs: -1),
+                topRight:    corner(us: +1, vs: -1),
+                bottomRight: corner(us: +1, vs: +1),
+                bottomLeft:  corner(us: -1, vs: +1)
+            )
+        }
     }
     
     /// Firestoreとの変換用

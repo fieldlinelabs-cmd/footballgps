@@ -68,13 +68,7 @@ struct FieldsListView: View {
     private var fieldsList: some View {
         List {
             ForEach(fieldManager.fields) { field in
-                Button {
-                    // フィールドを選択
-                    fieldManager.selectField(field.id)
-                } label: {
-                    FieldRow(field: field, isSelected: fieldManager.selectedFieldId == field.id)
-                }
-                .buttonStyle(.plain)
+                FieldRow(field: field)
                 .contextMenu {
                     Button {
                         editingField = field
@@ -104,15 +98,9 @@ struct FieldsListView: View {
 
 struct FieldRow: View {
     let field: Field
-    let isSelected: Bool
-    
+
     var body: some View {
         HStack(spacing: 12) {
-            // 選択インジケーター
-            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(isSelected ? .green : .secondary)
-                .font(.title3)
-            
             VStack(alignment: .leading, spacing: 4) {
                 Text(field.name)
                     .font(.headline)

@@ -7,6 +7,8 @@
 
 import SwiftUI
 import MapKit
+import CoreLocation
+import Combine
 
 /// 地図でフィールドの4隅を設定する画面
 struct MapFieldSetupView: View {
@@ -30,6 +32,8 @@ struct MapFieldSetupView: View {
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching = false
     @State private var mapType: MKMapType = .standard
+    @State private var isMapReady = false
+    @StateObject private var locationHelper = LocationHelper()
     
     enum CornerType: String, CaseIterable {
         case topLeft = "左上"
@@ -41,14 +45,18 @@ struct MapFieldSetupView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // 地図（カスタムビュー）
-                MapViewRepresentable(
-                    region: $region,
-                    mapType: $mapType,
-                    annotations: annotations,
-                    fieldPolygon: fieldPolygonCoordinates
-                )
-                .edgesIgnoringSafeArea(.all)
+                // 地図（カスタムビュー）- シートアニメーション完了後に生成してゼロサイズクラッシュを防ぐ
+                if isMapReady {
+                    MapViewRepresentable(
+                        region: $region,
+                        mapType: $mapType,
+                        annotations: annotations,
+                        fieldPolygon: fieldPolygonCoordinates
+                    )
+                    .edgesIgnoringSafeArea(.all)
+                } else {
+                    Color(.systemBackground).edgesIgnoringSafeArea(.all)
+                }
                 
                 // 検索バーと結果
                 VStack {
@@ -215,6 +223,15 @@ struct MapFieldSetupView: View {
             }
             .onAppear {
                 loadExistingCorners()
+                locationHelper.requestLocation { coordinate in
+                    if let c = coordinate {
+                        region.center = c
+                    }
+                }
+                // シートアニメーション完了後にマップを生成（ゼロサイズ時のMetalクラッシュ防止）
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isMapReady = true
+                }
             }
         }
     }
@@ -303,12 +320,14 @@ struct MapFieldSetupView: View {
     }
     
     private func centerOnCurrentLocation() {
-        // TODO: 現在地を取得して地図をセンタリング
-        // 現在はデフォルト位置（東京）
-        region = MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 35.6812, longitude: 139.7671),
-            span: MKCoordinateSpan(latitudeDelta: 0.002, longitudeDelta: 0.002)
-        )
+        locationHelper.requestLocation { coordinate in
+            if let c = coordinate {
+                region = MKCoordinateRegion(
+                    center: c,
+                    span: MKCoordinateSpan(latitudeDelta: 0.002, longitudeDelta: 0.002)
+                )
+            }
+        }
     }
     
     private func loadExistingCorners() {
@@ -518,6 +537,58 @@ struct MapViewRepresentable: UIViewRepresentable {
             }
             
             return annotationView
+        }
+    }
+}
+
+// MARK: - Location Helper
+
+final class LocationHelper: NSObject, ObservableObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var completion: ((CLLocationCoordinate2D?) -> Void)?
+    @Published private var _dummy = 0  // ObservableObject 合成用
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
+
+    func requestLocation(completion: @escaping (CLLocationCoordinate2D?) -> Void) {
+        self.completion = completion
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        default:
+            completion(nil)
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        DispatchQueue.main.async {
+            self.completion?(locations.last?.coordinate)
+            self.completion = nil
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        DispatchQueue.main.async {
+            self.completion?(nil)
+            self.completion = nil
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if manager.authorizationStatus == .authorizedWhenInUse ||
+           manager.authorizationStatus == .authorizedAlways {
+            manager.requestLocation()
+        } else {
+            DispatchQueue.main.async {
+                self.completion?(nil)
+                self.completion = nil
+            }
         }
     }
 }

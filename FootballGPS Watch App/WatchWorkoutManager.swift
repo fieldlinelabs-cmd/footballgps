@@ -8,6 +8,7 @@
 import Foundation
 import HealthKit
 import CoreLocation
+import CoreMotion
 import Combine
 import WatchConnectivity
 import WatchKit
@@ -34,8 +35,15 @@ class WorkoutManager: NSObject, ObservableObject {
 
     // GPS記録データ（デバッグ用に公開）
     @Published var gpsPoints: [GPSPoint] = []
-    
+
     // MARK: - Private Properties
+
+    // CoreMotion（加速度記録）
+    private let motionManager = CMMotionManager()
+    private var rawMotionSamples: [RawMotionSample] = []
+
+    // セッションIDを起動時に確定し sendDataToiPhone / transferRawMotionFile で共有する
+    private var currentSessionId: String = UUID().uuidString
     
     private let healthStore = HKHealthStore()
     private var session: HKWorkoutSession?
@@ -139,18 +147,23 @@ class WorkoutManager: NSObject, ObservableObject {
         
         // GPS記録開始
         locationManager.startUpdatingLocation()
-        
+
+        // 加速度記録開始（実機のみ）
+        #if !targetEnvironment(simulator)
+        startMotionRecording()
+        #endif
+
         // シミュレーター用: 疑似GPS生成を開始
         #if targetEnvironment(simulator)
         startGPSSimulation()
         #endif
-        
+
         // タイマー開始
         startTimer()
-        
+
         isRunning = true
         isPaused = false
-        
+
         print("✅ ワークアウト開始")
     }
     
@@ -187,28 +200,36 @@ class WorkoutManager: NSObject, ObservableObject {
     
     /// ワークアウトを終了
     func endWorkout() async throws {
+        // 加速度記録を最初に停止してサンプルを確定させる（実機のみ）
         #if !targetEnvironment(simulator)
-        // 実機のみ: HealthKit Session を終了
+        stopMotionRecording()
+        #endif
+
+        #if !targetEnvironment(simulator)
         session?.end()
         try await builder?.endCollection(at: Date())
         #else
         print("⚠️ シミュレータモード: HealthKit Workout 終了をスキップします")
         stopGPSSimulation()
         #endif
-        
+
         locationManager.stopUpdatingLocation()
         stopTimer()
-        
-        // ⚠️ isRunning は サマリー画面を閉じる時に false にする
-        // isRunning = false
+
         isPaused = false
-        
+
         print("🛑 ワークアウト終了")
         print("📊 総距離: \(distance)m, 最高速度: \(maxSpeed)m/s")
         print("📍 記録したポイント数: \(gpsPoints.count)")
-        
-        // iPhoneへデータを送信
+        print("📳 加速度サンプル数: \(rawMotionSamples.count)")
+
+        // iPhoneへセッション＋GPSデータを送信
         sendDataToiPhone()
+
+        // rawMotionファイルを転送（実機のみ）
+        #if !targetEnvironment(simulator)
+        writeAndTransferRawMotion()
+        #endif
     }
     
     /// iPhoneへセッションデータを送信
@@ -302,13 +323,16 @@ class WorkoutManager: NSObject, ObservableObject {
         let avgSpeed = distance > 0 ? distance / elapsedTime : 0
         
         let session = TrainingSession(
+            id: currentSessionId,
             userId: userId,
             date: startDate,
             duration: elapsedTime,
             totalDistance: distance,
             maxSpeed: maxSpeed,
             avgSpeed: avgSpeed,
-            sprintCount: nil
+            sprintCount: nil,
+            heartRate: heartRate > 0 ? heartRate : nil,
+            activeCalories: activeCalories > 0 ? activeCalories : nil
         )
         
         let gpsData = GPSData(
@@ -330,11 +354,13 @@ class WorkoutManager: NSObject, ObservableObject {
         zoneDistances = [0, 0, 0, 0, 0]
         locations.removeAll()
         gpsPoints.removeAll()
+        rawMotionSamples.removeAll()
         startDate = nil
         totalPausedDuration = 0
         pauseStartDate = nil
         previousLocation = nil
         startPointConfirmed = false
+        currentSessionId = UUID().uuidString  // 次のセッション用に更新
     }
     
     // MARK: - Timer
@@ -370,6 +396,67 @@ class WorkoutManager: NSObject, ObservableObject {
         default:        zoneIndex = 4 // スプリント
         }
         zoneDistances[zoneIndex] += distanceIncrement
+    }
+
+    // MARK: - Motion Recording
+
+    private func startMotionRecording() {
+        guard motionManager.isDeviceMotionAvailable else {
+            print("⚠️ DeviceMotion 利用不可")
+            return
+        }
+        rawMotionSamples.removeAll()
+        motionManager.deviceMotionUpdateInterval = 1.0 / 10.0
+        motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, error in
+            guard let self, let motion, error == nil else { return }
+            self.rawMotionSamples.append(RawMotionSample(
+                timestamp: Date().timeIntervalSince1970,
+                x: motion.userAcceleration.x,
+                y: motion.userAcceleration.y,
+                z: motion.userAcceleration.z
+            ))
+        }
+        print("📳 加速度記録開始")
+    }
+
+    private func stopMotionRecording() {
+        motionManager.stopDeviceMotionUpdates()
+        print("📳 加速度記録停止: \(rawMotionSamples.count) サンプル")
+    }
+
+    private func rawMotionTempURL(sessionId: String) -> URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return dir.appendingPathComponent("rawmotion_\(sessionId).json")
+    }
+
+    private func writeAndTransferRawMotion() {
+        guard !rawMotionSamples.isEmpty else {
+            print("⚠️ rawMotionSamples が空のため転送をスキップ")
+            return
+        }
+        let sessionId = currentSessionId
+        let samples = rawMotionSamples
+        let url = rawMotionTempURL(sessionId: sessionId)
+
+        Task.detached {
+            do {
+                let encoder = JSONEncoder()
+                let data = try encoder.encode(samples)
+                try FileManager.default.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try data.write(to: url, options: .atomic)
+                print("💾 rawMotion ファイル書き込み完了: \(url.lastPathComponent)")
+                await MainActor.run {
+                    WatchConnectivityService.shared.transferRawMotionFile(
+                        sessionId: sessionId, url: url
+                    )
+                }
+            } catch {
+                print("❌ rawMotion ファイル書き込みエラー: \(error)")
+            }
+        }
     }
 }
 
@@ -472,8 +559,9 @@ extension WorkoutManager: CLLocationManagerDelegate {
             let prevAcceptedLocation = self.locations.last
             self.locations.append(location)
 
-            // GPSポイントとして保存
-            let gpsPoint = GPSPoint(location: location)
+            // GPSポイントとして保存（心拍数を付加）
+            let hr = self.heartRate > 0 ? self.heartRate : nil
+            let gpsPoint = GPSPoint(location: location, heartRate: hr)
             self.gpsPoints.append(gpsPoint)
 
             // 距離を計算 (GPS ドリフトフィルタ: 0.3 m/s 未満は加算しない)

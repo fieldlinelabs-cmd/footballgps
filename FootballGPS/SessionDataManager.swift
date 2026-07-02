@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import CoreLocation
 
 /// セッションデータを管理するクラス（iPhone側）
 @MainActor
@@ -31,8 +32,9 @@ class SessionDataManager: ObservableObject {
         loadSessions()
         print("📱 SessionDataManager初期化完了: \(sessions.count)件のセッション")
 
-        // GPS ディレクトリを確保してマイグレーション実行
+        // GPS / アジリティ ディレクトリを確保してマイグレーション実行
         ensureGPSDirectoryExists()
+        ensureAgilityDirectoryExists()
         migrateGPSDataIfNeeded()
 
         // シミュレーター用: Watch側から保存されたデータを読み込む
@@ -66,10 +68,35 @@ class SessionDataManager: ObservableObject {
         print("📊 総セッション数: \(sessions.count)")
     }
 
+    /// 年齢・性別に応じたスプリント開始閾値を返す（m/s）
+    static func sprintThreshold(age: Int?, gender: Gender?) -> Double {
+        let g = gender ?? .male
+        let a = age ?? 25
+
+        switch (g, a) {
+        case (.female, ..<20):   return 4.72  // 17.0 km/h
+        case (.female, 20..<40): return 4.72
+        case (.female, 40..<50): return 4.17  // 15.0 km/h
+        case (.female, 50..<60): return 3.89  // 14.0 km/h
+        case (.female, 60...):   return 3.33  // 12.0 km/h
+
+        case (_, ..<20):   return 5.56  // 20.0 km/h
+        case (_, 20..<40): return 5.56
+        case (_, 40..<50): return 5.00  // 18.0 km/h
+        case (_, 50..<60): return 4.44  // 16.0 km/h
+        case (_, 60...):   return 3.89  // 14.0 km/h
+
+        default: return 5.56
+        }
+    }
+
     /// GPS データからスプリント回数を計算する
     static func calculateSprintCount(from gpsData: GPSData) -> Int {
-        let sprintThreshold: Double = 5.5
-        let sprintEndThreshold: Double = 4.5
+        let sprintThreshold = sprintThreshold(
+            age: UserProfileManager.shared.age,
+            gender: UserProfileManager.shared.profile.gender
+        )
+        let sprintEndThreshold = sprintThreshold * 0.72
         let minSprintDuration: TimeInterval = 2.0
         let minSprintInterval: TimeInterval = 5.0
 
@@ -113,6 +140,347 @@ class SessionDataManager: ObservableObject {
         return count
     }
 
+    /// 時間帯別運動量を5分単位で集計（非永続化）
+    static func computeTimeSeries(
+        gpsPoints: [GPSPoint],
+        intervalSeconds: TimeInterval = 300
+    ) -> [TimeSeriesBucket] {
+        guard let first = gpsPoints.first, let last = gpsPoints.last else { return [] }
+        let totalDuration = last.timestamp.timeIntervalSince(first.timestamp)
+        guard totalDuration > 0 else { return [] }
+
+        let bucketCount = max(1, Int(ceil(totalDuration / intervalSeconds)))
+        var distances   = [Double](repeating: 0, count: bucketCount)
+        var maxSpeeds   = [Double](repeating: 0, count: bucketCount)
+        var sprintCounts = [Int](repeating: 0, count: bucketCount)
+
+        let threshold = sprintThreshold(
+            age: UserProfileManager.shared.age,
+            gender: UserProfileManager.shared.profile.gender
+        )
+        var isInSprint = false
+
+        for i in gpsPoints.indices {
+            let point = gpsPoints[i]
+            let elapsed = point.timestamp.timeIntervalSince(first.timestamp)
+            let b = min(Int(elapsed / intervalSeconds), bucketCount - 1)
+
+            // 距離（前点との差分）
+            if i > 0 {
+                let prev = gpsPoints[i - 1]
+                let prevElapsed = prev.timestamp.timeIntervalSince(first.timestamp)
+                let prevB = min(Int(prevElapsed / intervalSeconds), bucketCount - 1)
+                if prevB == b && point.speed >= 0.3 {
+                    let loc1 = CLLocation(latitude: prev.latitude, longitude: prev.longitude)
+                    let loc2 = CLLocation(latitude: point.latitude, longitude: point.longitude)
+                    distances[b] += loc1.distance(from: loc2)
+                }
+            }
+
+            // 最高速度
+            if point.speed > maxSpeeds[b] { maxSpeeds[b] = point.speed }
+
+            // スプリント回数（開始検出）
+            let wasInSprint = isInSprint
+            if point.speed >= threshold { isInSprint = true }
+            else if point.speed < threshold * 0.72 { isInSprint = false }
+            if !wasInSprint && isInSprint { sprintCounts[b] += 1 }
+        }
+
+        return (0..<bucketCount).map { i in
+            TimeSeriesBucket(
+                id: i,
+                startMinute: i * Int(intervalSeconds / 60),
+                distance: distances[i],
+                sprintCount: sprintCounts[i],
+                maxSpeed: maxSpeeds[i]
+            )
+        }
+    }
+
+    /// スタミナ低下率を計算（後半/前半の1分あたり走行距離の比率）
+    /// 返値: 0.85未満なら後半スタミナ低下とみなす
+    static func computeStaminaDropRate(buckets: [TimeSeriesBucket]) -> Double? {
+        guard buckets.count >= 2 else { return nil }
+        let mid = buckets.count / 2
+        let firstAvg = buckets[0..<mid].map(\.distance).reduce(0, +) / Double(mid)
+        let secondAvg = buckets[mid...].map(\.distance).reduce(0, +) / Double(buckets.count - mid)
+        guard firstAvg > 0 else { return nil }
+        return secondAvg / firstAvg
+    }
+
+    /// サード別滞在割合を計算（守備/中盤/攻撃、永続化しない）
+    static func computeThirdRatios(
+        gpsData: GPSData,
+        field: Field,
+        isFlipped: Bool
+    ) -> (defensive: Double, middle: Double, attacking: Double) {
+        var defensiveCount = 0
+        var middleCount    = 0
+        var attackingCount = 0
+
+        for point in gpsData.points {
+            guard let fieldCoord = field.convertToFieldCoordinate(
+                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+            ) else { continue }
+
+            let fy = isFlipped
+                ? field.dimensions.length - fieldCoord.y
+                : fieldCoord.y
+
+            let length = field.dimensions.length
+            if fy < length / 3 {
+                defensiveCount += 1
+            } else if fy < length * 2 / 3 {
+                middleCount += 1
+            } else {
+                attackingCount += 1
+            }
+        }
+
+        let total = defensiveCount + middleCount + attackingCount
+        guard total > 0 else { return (0, 0, 0) }
+        return (
+            defensive: Double(defensiveCount) / Double(total) * 100,
+            middle:    Double(middleCount)    / Double(total) * 100,
+            attacking: Double(attackingCount) / Double(total) * 100
+        )
+    }
+
+    // MARK: - Style Sync Analysis
+
+    /// 全14スタイルとのシンクロ率を計算して降順で返す
+    /// - スタッツ類似度50% (スプリント/アジリティ/最高速度) + 空間類似度50% (ヒートマップcosine)
+    static func computeStyleSync(
+        gpsData: GPSData,
+        field: Field,
+        isFlipped: Bool,
+        sprintCount: Int,
+        agilityTurnCount: Int?,
+        maxSpeed: Double
+    ) -> [StyleSyncResult] {
+        guard !gpsData.points.isEmpty else { return [] }
+
+        let userGrid    = computeHeatmapGrid(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        let userSprint  = min(Double(sprintCount) / 30.0, 1.0)
+        let userAgility = agilityTurnCount.map { min(Double($0) / 50.0, 1.0) }
+        let userSpeed   = min(maxSpeed / 8.0, 1.0)
+
+        return ProStyle.all.map { style in
+            // Stats similarity (50%): 各軸の差 × 2 を 0-1 スコアに変換
+            let sprintScore  = max(0.0, 1.0 - abs(userSprint  - style.sprintTarget)  * 2)
+            let agilityScore = userAgility.map { max(0.0, 1.0 - abs($0 - style.agilityTarget) * 2) } ?? 0.5
+            let speedScore   = max(0.0, 1.0 - abs(userSpeed   - style.maxSpeedTarget) * 2)
+            let statsSim     = (sprintScore + agilityScore + speedScore) / 3.0
+
+            // Spatial similarity (50%): 理想ヒートマップとのコサイン類似度
+            let idealGrid   = generateIdealHeatmap(style: style)
+            let spatialSim  = cosineSimilarity(userGrid, idealGrid)
+
+            let syncRate = (statsSim * 0.5 + spatialSim * 0.5) * 100.0
+            return StyleSyncResult(style: style, syncRate: syncRate)
+        }.sorted { $0.syncRate > $1.syncRate }
+    }
+
+    /// GPSデータから28×40のヒートマップグリッドを生成（コサイン類似度計算用）
+    private static func computeHeatmapGrid(
+        gpsData: GPSData,
+        field: Field,
+        isFlipped: Bool
+    ) -> [[Double]] {
+        let gridRows = 28  // fy方向（守備→攻撃）
+        let gridCols = 40  // fx方向（左→右）
+        var grid = Array(repeating: Array(repeating: 0.0, count: gridCols), count: gridRows)
+        let sigma: Double = 1.5
+        let kernelRadius  = 4
+
+        for point in gpsData.points {
+            guard let fc = field.convertToFieldCoordinate(
+                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+            ) else { continue }
+            let fx = isFlipped ? field.dimensions.width  - fc.x : fc.x
+            let fy = isFlipped ? field.dimensions.length - fc.y : fc.y
+            let row = Int((fy / field.dimensions.length) * Double(gridRows)).clamped(to: 0..<gridRows)
+            let col = Int((fx / field.dimensions.width)  * Double(gridCols)).clamped(to: 0..<gridCols)
+            for dr in -kernelRadius...kernelRadius {
+                for dc in -kernelRadius...kernelRadius {
+                    let r = row + dr; let c = col + dc
+                    guard r >= 0, r < gridRows, c >= 0, c < gridCols else { continue }
+                    let d = sqrt(Double(dr * dr + dc * dc))
+                    grid[r][c] += exp(-(d * d) / (2.0 * sigma * sigma))
+                }
+            }
+        }
+        return grid
+    }
+
+    /// スタイル定義から理想ヒートマップを生成
+    private static func generateIdealHeatmap(style: ProStyle) -> [[Double]] {
+        let gridRows = 28  // fy方向（row=0: 守備, row=27: 攻撃）
+        let gridCols = 40  // fx方向（col=0: 左, col=39: 右）
+        var grid = Array(repeating: Array(repeating: 0.0, count: gridCols), count: gridRows)
+
+        // ゾーン中心（row方向、27を3分割）
+        let defCenter = 4.5;  let midCenter = 13.5;  let attCenter = 22.5
+        let sigmaRow = 2.0 + style.heatmapSpread * 6.0
+        let sigmaCol = 3.0 + style.heatmapSpread * 8.0
+        let centerCol = 19.5  // フィールド横方向の中心
+
+        for r in 0..<gridRows {
+            for c in 0..<gridCols {
+                let rD = Double(r); let cD = Double(c)
+                // 縦方向: ゾーン比率でガウス重み
+                let rowW = style.defensiveThird * exp(-pow(rD - defCenter, 2) / (2 * sigmaRow * sigmaRow))
+                         + style.middleThird    * exp(-pow(rD - midCenter, 2) / (2 * sigmaRow * sigmaRow))
+                         + style.attackingThird * exp(-pow(rD - attCenter, 2) / (2 * sigmaRow * sigmaRow))
+                // 横方向: 中央 or 側面バイアス
+                let colW: Double
+                if style.lateralBias < 0.3 {
+                    colW = exp(-pow(cD - centerCol, 2) / (2 * sigmaCol * sigmaCol))
+                } else {
+                    let t = min(1.0, (style.lateralBias - 0.3) / 0.7)
+                    let ctrW  = exp(-pow(cD - centerCol, 2) / (2 * sigmaCol * sigmaCol))
+                    let leftW = exp(-pow(cD - 5.0,       2) / (2 * sigmaCol * sigmaCol))
+                    let rgtW  = exp(-pow(cD - 34.0,      2) / (2 * sigmaCol * sigmaCol))
+                    colW = (1.0 - t) * ctrW + t * (leftW + rgtW) / 2.0
+                }
+                grid[r][c] = rowW * colW
+            }
+        }
+        let mx = grid.flatMap { $0 }.max() ?? 1.0
+        if mx > 0 { for r in 0..<gridRows { for c in 0..<gridCols { grid[r][c] /= mx } } }
+        return grid
+    }
+
+    /// 2Dグリッドのコサイン類似度 (0-1)
+    private static func cosineSimilarity(_ a: [[Double]], _ b: [[Double]]) -> Double {
+        let aFlat = a.flatMap { $0 }
+        let bFlat = b.flatMap { $0 }
+        guard aFlat.count == bFlat.count else { return 0 }
+        let dot  = zip(aFlat, bFlat).reduce(0.0) { $0 + $1.0 * $1.1 }
+        let magA = sqrt(aFlat.reduce(0.0) { $0 + $1 * $1 })
+        let magB = sqrt(bFlat.reduce(0.0) { $0 + $1 * $1 })
+        guard magA > 0, magB > 0 else { return 0 }
+        return dot / (magA * magB)
+    }
+
+    // MARK: - Player Radar Analysis
+
+    /// 6軸評価からレーダーチャートデータとプレイヤータイプを計算
+    /// 各軸は固定基準値で 0…1 に正規化、最高スコアの軸で称号を決定
+    static func computePlayerRadar(
+        totalDistance: Double,
+        sprintCount: Int,
+        agilityTurnCount: Int?,
+        staminaDrop: Double?,
+        hrIntensityRatio: Double?,
+        maxSpeed: Double
+    ) -> PlayerRadarData {
+        let distanceScore  = min(totalDistance / 10000.0, 1.0)
+        let sprintScore    = min(Double(sprintCount) / 30.0, 1.0)
+        let agilityScore   = min(Double(agilityTurnCount ?? 0) / 50.0, 1.0)
+        let staminaScore   = min(staminaDrop ?? 0, 1.0)
+        let intensityScore = min((hrIntensityRatio ?? 0) / 40.0, 1.0)
+        let topSpeedScore  = min(maxSpeed / 8.0, 1.0)  // 8 m/s ≈ 29 km/h = 1.0
+
+        let scores: [Double] = [distanceScore, sprintScore, agilityScore, staminaScore, intensityScore, topSpeedScore]
+        let overall = scores.reduce(0, +) / Double(scores.count) * 100.0
+
+        let types: [PlayerType] = [.longRunner, .sprinter, .agile, .stamina, .hardWorker, .speedster]
+        let maxIdx = scores.indices.max(by: { scores[$0] < scores[$1] }) ?? 0
+
+        return PlayerRadarData(
+            distance:     distanceScore,
+            sprint:       sprintScore,
+            agility:      agilityScore,
+            stamina:      staminaScore,
+            intensity:    intensityScore,
+            topSpeed:     topSpeedScore,
+            playerType:   types[maxIdx],
+            overallScore: overall
+        )
+    }
+
+    // MARK: - Heart Rate Intensity Analysis
+
+    /// 年齢から最大心拍数を推定
+    /// 49歳以下: 標準式 (220 - age)  /  50歳以上: Tanaka式 (208 - 0.7 × age)
+    static func maxHeartRate(age: Int) -> Double {
+        if age < 50 {
+            return Double(220 - age)
+        } else {
+            return 208.0 - 0.7 * Double(age)
+        }
+    }
+
+    /// HR付きGPSPointsから高強度割合・高強度スプリント回数を計算
+    /// - Returns: (highIntensityRatio: 0–100%, highIntensitySprintCount)
+    ///   HRデータが存在しない場合は nil を返す
+    static func computeHeartRateIntensity(
+        gpsPoints: [GPSPoint],
+        age: Int
+    ) -> (highIntensityRatio: Double, highIntensitySprintCount: Int)? {
+        let hrPoints = gpsPoints.compactMap { $0.heartRate }
+        guard !hrPoints.isEmpty else { return nil }
+
+        let maxHR = maxHeartRate(age: age)
+        let threshold = maxHR * 0.80
+
+        // 高強度割合
+        let highCount = hrPoints.filter { $0 >= threshold }.count
+        let ratio = Double(highCount) / Double(hrPoints.count) * 100.0
+
+        // 高強度スプリント回数：スプリント区間の中でHR >= 80%maxHR の区間を数える
+        let sprintSegments = computeSprintSegments(gpsPoints)
+        var highIntensitySprints = 0
+        for seg in sprintSegments {
+            let segPoints = Array(gpsPoints[seg.startIndex...seg.endIndex])
+            let segHR = segPoints.compactMap { $0.heartRate }
+            if !segHR.isEmpty {
+                let avgHR = segHR.reduce(0, +) / Double(segHR.count)
+                if avgHR >= threshold { highIntensitySprints += 1 }
+            }
+        }
+
+        return (highIntensityRatio: ratio, highIntensitySprintCount: highIntensitySprints)
+    }
+
+    /// GPS速度からスプリント区間を検出して返す（非永続化・毎回再計算）
+    static func computeSprintSegments(_ gpsPoints: [GPSPoint]) -> [SprintSegment] {
+        let threshold = sprintThreshold(
+            age: UserProfileManager.shared.age,
+            gender: UserProfileManager.shared.profile.gender
+        )
+        let endThreshold = threshold * 0.72
+        let minDuration: TimeInterval = 1.0
+
+        var segments: [SprintSegment] = []
+        var sprintStart: Int? = nil
+
+        for i in 0..<gpsPoints.count {
+            let speed = gpsPoints[i].speed
+            if sprintStart == nil && speed >= threshold {
+                sprintStart = i
+            } else if let start = sprintStart, speed < endThreshold {
+                let duration = gpsPoints[i].timestamp.timeIntervalSince(gpsPoints[start].timestamp)
+                if duration >= minDuration {
+                    let maxSpeed = gpsPoints[start...i].map(\.speed).max() ?? 0
+                    var dist = 0.0
+                    for j in start..<i {
+                        let a = gpsPoints[j], b = gpsPoints[j + 1]
+                        let loc1 = CLLocation(latitude: a.latitude, longitude: a.longitude)
+                        let loc2 = CLLocation(latitude: b.latitude, longitude: b.longitude)
+                        dist += loc1.distance(from: loc2)
+                    }
+                    segments.append(SprintSegment(startIndex: start, endIndex: i,
+                                                  maxSpeed: maxSpeed, distance: dist))
+                }
+                sprintStart = nil
+            }
+        }
+        return segments
+    }
+
     /// GPSデータを取得
     func getGPSData(for sessionId: String) -> GPSData? {
         if let cached = gpsDataCache[sessionId] {
@@ -139,6 +507,7 @@ class SessionDataManager: ObservableObject {
 
         persistSessions()
         deleteGPSData(sessionId: session.id)
+        deleteAgilityData(sessionId: session.id)
 
         print("🗑️ セッション削除: \(session.name)")
     }
@@ -200,6 +569,131 @@ class SessionDataManager: ObservableObject {
     private func deleteGPSData(sessionId: String) {
         // ファイルが存在しない場合は無視（エラーとして扱わない）
         try? FileManager.default.removeItem(at: gpsFileURL(for: sessionId))
+    }
+
+    // MARK: - Agility Data
+
+    private var agilityDirectory: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("FootballGPS/agility", isDirectory: true)
+    }
+
+    private func agilityFileURL(for sessionId: String) -> URL {
+        agilityDirectory.appendingPathComponent("agilitydata_\(sessionId).json")
+    }
+
+    private func ensureAgilityDirectoryExists() {
+        let dir = agilityDirectory
+        guard !FileManager.default.fileExists(atPath: dir.path) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    private func saveAgilityData(_ data: AgilityData) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let encoded = try? encoder.encode(data) else { return }
+        try? encoded.write(to: agilityFileURL(for: data.sessionId), options: .atomic)
+    }
+
+    func loadAgilityData(sessionId: String) -> AgilityData? {
+        let url = agilityFileURL(for: sessionId)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(AgilityData.self, from: data)
+    }
+
+    private func deleteAgilityData(sessionId: String) {
+        try? FileManager.default.removeItem(at: agilityFileURL(for: sessionId))
+    }
+
+    /// Watch から受信した rawMotion JSON ファイルを処理してアジリティイベントを検出・保存
+    func processRawMotionFile(_ srcURL: URL, sessionId: String) {
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            guard let data = try? Data(contentsOf: srcURL) else {
+                print("❌ rawMotion ファイル読み込み失敗: \(srcURL.lastPathComponent)")
+                return
+            }
+            guard let samples = try? JSONDecoder().decode([RawMotionSample].self, from: data) else {
+                print("❌ rawMotion JSON デコード失敗")
+                return
+            }
+            print("📳 rawMotion サンプル数: \(samples.count)")
+
+            let events = Self.detectAgilityEventsFromRawMotion(samples)
+            let agilityData = AgilityData(sessionId: sessionId, events: events)
+
+            // アジリティスコアを計算（0–100 整数）
+            let turnCount = events.count
+            let score: Int
+            if events.isEmpty {
+                score = 0
+            } else {
+                let avgPeak = events.map(\.magnitude).reduce(0, +) / Double(events.count)
+                score = max(0, min(100, Int((avgPeak - 8.0) / (15.0 - 8.0) * 100)))
+            }
+
+            await MainActor.run {
+                self.saveAgilityData(agilityData)
+                // セッションに反映
+                if let idx = self.sessions.firstIndex(where: { $0.id == sessionId }) {
+                    self.sessions[idx].agilityTurnCount = turnCount
+                    self.sessions[idx].agilityScore = score
+                    self.persistSessions()
+                }
+                print("✅ アジリティ処理完了: \(turnCount)回, スコア=\(score)")
+            }
+        }
+    }
+
+    /// B方式ヒステリシス検出: 開始閾値 8.0G / 終了閾値 0.5G が 0.5秒継続
+    private static nonisolated func detectAgilityEventsFromRawMotion(_ samples: [RawMotionSample]) -> [AgilityEvent] {
+        let startThreshold = 8.0
+        let endThreshold = 0.5
+        let quietDuration = 0.5
+
+        var events: [AgilityEvent] = []
+        var isInEvent = false
+        var peakMagnitude = 0.0
+        var peakTimestamp: TimeInterval = 0
+        var quietStart: TimeInterval? = nil
+
+        for sample in samples {
+            let magnitude = sqrt(sample.x * sample.x + sample.y * sample.y + sample.z * sample.z)
+
+            if isInEvent {
+                if magnitude > peakMagnitude {
+                    peakMagnitude = magnitude
+                    peakTimestamp = sample.timestamp
+                }
+                if magnitude < endThreshold {
+                    if let qs = quietStart {
+                        if sample.timestamp - qs >= quietDuration {
+                            events.append(AgilityEvent(
+                                timestamp: Date(timeIntervalSince1970: peakTimestamp),
+                                magnitude: peakMagnitude
+                            ))
+                            isInEvent = false
+                            quietStart = nil
+                            peakMagnitude = 0.0
+                        }
+                    } else {
+                        quietStart = sample.timestamp
+                    }
+                } else {
+                    quietStart = nil
+                }
+            } else {
+                if magnitude > startThreshold {
+                    isInEvent = true
+                    peakMagnitude = magnitude
+                    peakTimestamp = sample.timestamp
+                    quietStart = nil
+                }
+            }
+        }
+        return events
     }
 
     // MARK: - GPS Directory
@@ -362,6 +856,114 @@ class SessionDataManager: ObservableObject {
         if loadedCount > 0 {
             print("✅ Watch側から\(loadedCount)件のセッションを読み込みました")
         }
+    }
+    #endif
+
+    // MARK: - Calibration Data (Debug)
+
+    #if DEBUG
+    var calibrationDirectory: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("FootballGPS/calibration", isDirectory: true)
+    }
+
+    func clearCalibrationFiles() {
+        let dir = calibrationDirectory
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+        ) else { return }
+        for file in files {
+            try? FileManager.default.removeItem(at: file)
+        }
+        print("🗑️ キャリブレーションCSV削除: \(files.count)件")
+    }
+
+    func saveCalibrationFile(from sourceURL: URL, filename: String) {
+        let dir = calibrationDirectory
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        let destURL = dir.appendingPathComponent(filename)
+        do {
+            if FileManager.default.fileExists(atPath: destURL.path) {
+                try FileManager.default.removeItem(at: destURL)
+            }
+            try FileManager.default.copyItem(at: sourceURL, to: destURL)
+            print("✅ キャリブレーションCSV保存: \(filename)")
+        } catch {
+            print("❌ キャリブレーションCSV保存失敗: \(error)")
+        }
+    }
+
+    // MARK: - Agility Detection (Debug)
+
+    /// キャリブレーション用アジリティイベント（peakMagnitude のみ）
+    struct CalibrationAgilityEvent {
+        let peakMagnitude: Double
+    }
+
+    /// アジリティメトリクス集計結果
+    struct AgilityMetrics {
+        let eventCount: Int
+        let avgPeakMagnitude: Double
+        let score: Double // 0.0 〜 1.0
+    }
+
+    /// B方式ヒステリシス検出: 8.0G超でイベント開始、0.5G未満が0.5秒継続でイベント終了
+    static func detectAgilityEvents(from samples: [CalibrationSample]) -> [CalibrationAgilityEvent] {
+        let startThreshold = 8.0
+        let endThreshold = 0.5
+        let quietDuration = 0.5
+
+        var events: [CalibrationAgilityEvent] = []
+        var isInEvent = false
+        var peakMagnitude = 0.0
+        var quietStart: TimeInterval? = nil
+
+        for sample in samples {
+            let magnitude = sqrt(sample.accX * sample.accX + sample.accY * sample.accY + sample.accZ * sample.accZ)
+
+            if isInEvent {
+                peakMagnitude = max(peakMagnitude, magnitude)
+                if magnitude < endThreshold {
+                    if let qs = quietStart {
+                        if sample.timestamp - qs >= quietDuration {
+                            events.append(CalibrationAgilityEvent(peakMagnitude: peakMagnitude))
+                            isInEvent = false
+                            quietStart = nil
+                            peakMagnitude = 0.0
+                        }
+                    } else {
+                        quietStart = sample.timestamp
+                    }
+                } else {
+                    quietStart = nil
+                }
+            } else {
+                if magnitude > startThreshold {
+                    isInEvent = true
+                    peakMagnitude = magnitude
+                    quietStart = nil
+                }
+            }
+        }
+
+        return events
+    }
+
+    /// アジリティイベント群からスコアと統計を計算（8.0G基準）
+    static func computeAgilityMetrics(from events: [CalibrationAgilityEvent]) -> AgilityMetrics {
+        let lowerBound = 8.0
+        let upperBound = 15.0
+
+        guard !events.isEmpty else {
+            return AgilityMetrics(eventCount: 0, avgPeakMagnitude: 0, score: 0)
+        }
+
+        let avgPeak = events.map { $0.peakMagnitude }.reduce(0, +) / Double(events.count)
+        let score = max(0.0, min(1.0, (avgPeak - lowerBound) / (upperBound - lowerBound)))
+
+        return AgilityMetrics(eventCount: events.count, avgPeakMagnitude: avgPeak, score: score)
     }
     #endif
 }

@@ -15,14 +15,11 @@ class FieldManager: ObservableObject {
     static let shared = FieldManager()
     
     @Published var fields: [Field] = []
-    @Published var selectedFieldId: String?
-    
+
     private let fieldsKey = "savedFields"
-    private let selectedFieldKey = "selectedFieldId"
-    
+
     private init() {
         loadFields()
-        loadSelectedField()
     }
     
     // MARK: - Field Operations
@@ -31,13 +28,6 @@ class FieldManager: ObservableObject {
     func addField(_ field: Field) {
         fields.append(field)
         persistFields()
-        
-        // 最初のフィールドを自動的に選択
-        if fields.count == 1 {
-            selectedFieldId = field.id
-            persistSelectedField()
-        }
-        
         print("✅ フィールド追加: \(field.name)")
     }
     
@@ -53,29 +43,8 @@ class FieldManager: ObservableObject {
     /// フィールドを削除
     func deleteField(_ field: Field) {
         fields.removeAll { $0.id == field.id }
-        
-        // 削除したフィールドが選択されていた場合
-        if selectedFieldId == field.id {
-            selectedFieldId = fields.first?.id
-            persistSelectedField()
-        }
-        
         persistFields()
         print("🗑️ フィールド削除: \(field.name)")
-    }
-    
-    /// 選択中のフィールドを設定
-    func selectField(_ fieldId: String?) {
-        selectedFieldId = fieldId
-        persistSelectedField()
-        
-        print("📍 フィールド選択: \(fieldId ?? "なし")")
-    }
-    
-    /// 選択中のフィールドを取得
-    func getSelectedField() -> Field? {
-        guard let selectedId = selectedFieldId else { return nil }
-        return fields.first { $0.id == selectedId }
     }
     
     /// IDからフィールドを取得
@@ -135,28 +104,12 @@ class FieldManager: ObservableObject {
         }
     }
     
-    private func persistSelectedField() {
-        if let selectedId = selectedFieldId {
-            UserDefaults.standard.set(selectedId, forKey: selectedFieldKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: selectedFieldKey)
-        }
-    }
-    
-    private func loadSelectedField() {
-        selectedFieldId = UserDefaults.standard.string(forKey: selectedFieldKey)
-    }
-    
     // MARK: - Utilities
     
     /// すべてのフィールドをクリア（開発用）
     func clearAllFields() {
         fields.removeAll()
-        selectedFieldId = nil
-        
         UserDefaults.standard.removeObject(forKey: fieldsKey)
-        UserDefaults.standard.removeObject(forKey: selectedFieldKey)
-        
         print("🗑️ すべてのフィールドをクリアしました")
     }
 }

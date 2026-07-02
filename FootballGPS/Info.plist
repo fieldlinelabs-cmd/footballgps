@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict/>
+<dict>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>フィールドの位置を地図に設定するために現在地を使用します。</string>
+    <key>SUPABASE_URL</key>
+    <string>https://cpbczeugekezejumretu.supabase.co</string>
+    <key>SUPABASE_ANON_KEY</key>
+    <string>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwYmN6ZXVnZWtlemVqdW1yZXR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODA5MzEsImV4cCI6MjA5ODA1NjkzMX0.Jb9g7plWefuGXQM0fs9BfRO61ExZN9wf0KnnHPA31t8</string>
+</dict>
 </plist>

@@ -15,13 +15,15 @@ struct FieldHeatmapView: View {
     let isFlipped: Bool
     
     // ヒートマップのグリッドサイズ（倍密化: 約2.5m/セル）
-    // 90度回転のため、行と列を入れ替える
-    private let gridRows = 28 // 横方向（幅）
-    private let gridCols = 40 // 縦方向（長さ）
+    private let gridRows = 28 // 幅方向（width: 68m）
+    private let gridCols = 40 // 長さ方向（length: 105m）
     
     var body: some View {
         GeometryReader { geometry in
             let (drawWidth, drawHeight) = fieldDrawSize(in: geometry.size)
+            let thirdRatios = SessionDataManager.computeThirdRatios(
+                gpsData: gpsData, field: field, isFlipped: isFlipped
+            )
             ZStack {
                 // フィールド背景
                 FieldBackgroundView()
@@ -36,6 +38,13 @@ struct FieldHeatmapView: View {
                     field: field
                 )
                 .blur(radius: 6)
+
+                // サード境界線・ラベルオーバーレイ
+                ThirdLinesOverlay(
+                    thirdRatios: thirdRatios,
+                    field: field,
+                    size: geometry.size
+                )
             }
             .background(Color(.systemBackground))
             .cornerRadius(12)
@@ -76,9 +85,8 @@ struct FieldHeatmapView: View {
             let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
 
             // フィールド座標をグリッドインデックスに変換
-            // 90度回転のため、x と y を入れ替える
-            let normalizedX = fy / field.dimensions.length // y → 横方向
-            let normalizedY = fx / field.dimensions.width  // x → 縦方向
+            let normalizedX = fx / field.dimensions.width
+            let normalizedY = fy / field.dimensions.length
 
             let col = Int(normalizedX * Double(gridCols)).clamped(to: 0..<gridCols)
             let row = Int(normalizedY * Double(gridRows)).clamped(to: 0..<gridRows)
@@ -180,6 +188,73 @@ struct HeatmapGridView: View {
         } else {
             let t = (intensity - 0.75) / 0.25
             return Color(red: 1, green: 1 - t, blue: 0).opacity(opacity)
+        }
+    }
+}
+
+// MARK: - Third Lines Overlay
+
+/// ヒートマップ上にサード境界線とラベルを描画するオーバーレイ
+private struct ThirdLinesOverlay: View {
+    let thirdRatios: (defensive: Double, middle: Double, attacking: Double)
+    let field: Field
+    let size: CGSize
+
+    var body: some View {
+        let padding: CGFloat = 20
+        let availableWidth  = size.width  - padding * 2
+        let availableHeight = size.height - padding * 2
+        let fieldRatio = autoFieldRatio(field.dimensions)
+
+        var drawWidth  = availableWidth
+        var drawHeight = availableWidth / fieldRatio
+        if drawHeight > availableHeight {
+            drawHeight = availableHeight
+            drawWidth  = drawHeight * fieldRatio
+        }
+
+        let offsetX = (size.width  - drawWidth)  / 2
+        let offsetY = (size.height - drawHeight) / 2
+
+        // fy → Y方向（縦）にマッピングされるため境界は水平破線
+        let b1y = offsetY + drawHeight / 3
+        let b2y = offsetY + drawHeight * 2 / 3
+        let midX = offsetX + drawWidth / 2
+
+        return ZStack {
+            Canvas { context, _ in
+                for y in [b1y, b2y] {
+                    var path = Path()
+                    path.move(to: CGPoint(x: offsetX, y: y))
+                    path.addLine(to: CGPoint(x: offsetX + drawWidth, y: y))
+                    context.stroke(
+                        path,
+                        with: .color(.white.opacity(0.8)),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                    )
+                }
+            }
+
+            Text(String(format: "守備\n%.0f%%", thirdRatios.defensive))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .shadow(color: .black.opacity(0.6), radius: 2)
+                .position(x: midX, y: offsetY + drawHeight / 6)
+
+            Text(String(format: "中盤\n%.0f%%", thirdRatios.middle))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .shadow(color: .black.opacity(0.6), radius: 2)
+                .position(x: midX, y: offsetY + drawHeight / 2)
+
+            Text(String(format: "攻撃\n%.0f%%", thirdRatios.attacking))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .shadow(color: .black.opacity(0.6), radius: 2)
+                .position(x: midX, y: offsetY + drawHeight * 5 / 6)
         }
     }
 }

@@ -47,8 +47,8 @@ class WatchConnectivityService: NSObject, ObservableObject {
             "session": session.dictionary,
             "gpsData": [
                 "sessionId": gpsData.sessionId,
-                "points": gpsData.points.map { point in
-                    [
+                "points": gpsData.points.map { point -> [String: Any] in
+                    var dict: [String: Any] = [
                         "timestamp": point.timestamp.timeIntervalSince1970,
                         "latitude": point.latitude,
                         "longitude": point.longitude,
@@ -56,6 +56,8 @@ class WatchConnectivityService: NSObject, ObservableObject {
                         "altitude": point.altitude,
                         "horizontalAccuracy": point.horizontalAccuracy
                     ]
+                    if let hr = point.heartRate, hr > 0 { dict["heartRate"] = hr }
+                    return dict
                 }
             ]
         ]
@@ -98,6 +100,18 @@ class WatchConnectivityService: NSObject, ObservableObject {
     var pendingTransferCount: Int {
         WCSession.default.outstandingUserInfoTransfers.count
     }
+
+    /// rawMotion ファイルを iPhone へ転送
+    func transferRawMotionFile(sessionId: String, url: URL) {
+        guard WCSession.default.activationState == .activated else {
+            print("❌ WatchConnectivity未初期化 - rawMotion転送スキップ")
+            return
+        }
+        let metadata: [String: Any] = ["type": "rawMotion", "sessionId": sessionId]
+        WCSession.default.transferFile(url, metadata: metadata)
+        print("📤 rawMotion ファイル転送キュー追加: \(url.lastPathComponent)")
+    }
+
 }
 
 // MARK: - WCSessionDelegate
@@ -148,6 +162,21 @@ extension WatchConnectivityService: WCSessionDelegate {
         } else {
             print("✅ キューイング送信完了")
             print("🔄 残り未送信データ数: \(session.outstandingUserInfoTransfers.count)")
+        }
+    }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didFinish fileTransfer: WCSessionFileTransfer,
+        error: Error?
+    ) {
+        let name = fileTransfer.file.fileURL.lastPathComponent
+        if let error {
+            print("❌ rawMotion ファイル転送失敗: \(name) - \(error.localizedDescription)")
+        } else {
+            print("✅ rawMotion ファイル転送完了: \(name)")
+            // Watch 側の一時ファイルを削除
+            try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
         }
     }
 }

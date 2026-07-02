@@ -99,7 +99,9 @@ class PhoneWatchConnectivityService: NSObject, ObservableObject {
         let visibility = TrainingSession.SessionVisibility(rawValue: visibilityStr) ?? .private
         let sprintCount = dict["sprintCount"] as? Int
         let gpsDataPath = dict["gpsDataPath"] as? String
-        
+        let heartRate = dict["heartRate"] as? Double
+        let activeCalories = dict["activeCalories"] as? Double
+
         return TrainingSession(
             id: id,
             userId: userId,
@@ -113,7 +115,9 @@ class PhoneWatchConnectivityService: NSObject, ObservableObject {
             maxSpeed: maxSpeed,
             avgSpeed: avgSpeed,
             sprintCount: sprintCount,
-            gpsDataPath: gpsDataPath
+            gpsDataPath: gpsDataPath,
+            heartRate: heartRate,
+            activeCalories: activeCalories
         )
     }
     
@@ -133,13 +137,15 @@ class PhoneWatchConnectivityService: NSObject, ObservableObject {
                 return nil
             }
             
+            let heartRate = pointDict["heartRate"] as? Double
             return GPSPoint(
                 timestamp: Date(timeIntervalSince1970: timestamp),
                 latitude: latitude,
                 longitude: longitude,
                 speed: speed,
                 altitude: altitude,
-                horizontalAccuracy: horizontalAccuracy
+                horizontalAccuracy: horizontalAccuracy,
+                heartRate: heartRate
             )
         }
         
@@ -206,6 +212,41 @@ extension PhoneWatchConnectivityService: WCSessionDelegate {
         Task { @MainActor in
             print("📥 キューイングデータ受信")
             self.handleReceivedData(userInfo)
+        }
+    }
+
+    // ファイル受信（rawMotion JSON / キャリブレーションCSV）
+    nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        let metadata = file.metadata
+        guard let type = metadata?["type"] as? String else {
+            print("⚠️ 不明なファイル受信: \(metadata ?? [:])")
+            return
+        }
+
+        switch type {
+        case "rawMotion":
+            guard let sessionId = metadata?["sessionId"] as? String else {
+                print("⚠️ rawMotion: sessionId がメタデータに含まれていません")
+                return
+            }
+            // ファイルを一時パスからアジリティディレクトリへコピーしてから処理
+            let srcURL = file.fileURL
+            Task { @MainActor in
+                print("📥 rawMotion ファイル受信: sessionId=\(sessionId)")
+                SessionDataManager.shared.processRawMotionFile(srcURL, sessionId: sessionId)
+            }
+
+        case "calibration":
+            guard let filename = metadata?["filename"] as? String else { return }
+            Task { @MainActor in
+                print("📥 キャリブレーションCSV受信: \(filename)")
+                #if DEBUG
+                SessionDataManager.shared.saveCalibrationFile(from: file.fileURL, filename: filename)
+                #endif
+            }
+
+        default:
+            print("⚠️ 不明なファイルタイプ: \(type)")
         }
     }
     

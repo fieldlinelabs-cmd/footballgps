@@ -14,6 +14,7 @@ struct FieldPositioningView: View {
     let field: Field
     let isFlipped: Bool
     let currentPointIndex: Int
+    var sprintSegments: [SprintSegment] = []
 
     var body: some View {
         GeometryReader { geometry in
@@ -28,6 +29,15 @@ struct FieldPositioningView: View {
                 if let path = createPath(points: allPoints) {
                     path
                         .stroke(Color.blue, lineWidth: 2)
+                }
+
+                // スプリント区間（赤線）
+                ForEach(sprintSegments.indices, id: \.self) { i in
+                    let seg = sprintSegments[i]
+                    if let path = createPath(points: sprintPoints(seg, in: geometry.size)) {
+                        path
+                            .stroke(Color.red, lineWidth: 2)
+                    }
                 }
 
                 // スタート地点
@@ -111,9 +121,8 @@ struct FieldPositioningView: View {
             let fx = isFlipped ? field.dimensions.width  - fieldCoord.x : fieldCoord.x
             let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
 
-            // 90度回転のため、x と y を入れ替える（ヒートマップと同じ仕様）
-            let x = offsetX + (fy / field.dimensions.length) * drawWidth
-            let y = offsetY + (fx / field.dimensions.width) * drawHeight
+            let x = offsetX + (fx / field.dimensions.width)  * drawWidth
+            let y = offsetY + (fy / field.dimensions.length) * drawHeight
 
             return CGPoint(x: x, y: y)
         }
@@ -140,6 +149,37 @@ struct FieldPositioningView: View {
             drawWidth  = drawHeight * fieldRatio
         }
         return (drawWidth, drawHeight)
+    }
+
+    /// スプリント区間のGPS点をビュー座標に変換
+    private func sprintPoints(_ segment: SprintSegment, in size: CGSize) -> [CGPoint] {
+        let padding: CGFloat = 20
+        let availableWidth  = size.width  - padding * 2
+        let availableHeight = size.height - padding * 2
+        let fieldRatio = autoFieldRatio(field.dimensions)
+        var drawWidth  = availableWidth
+        var drawHeight = availableWidth / fieldRatio
+        if drawHeight > availableHeight {
+            drawHeight = availableHeight
+            drawWidth  = drawHeight * fieldRatio
+        }
+        let offsetX = (size.width  - drawWidth)  / 2
+        let offsetY = (size.height - drawHeight) / 2
+
+        let end = min(segment.endIndex, gpsData.points.count - 1)
+        guard segment.startIndex <= end else { return [] }
+
+        return gpsData.points[segment.startIndex...end].compactMap { point in
+            guard let fieldCoord = field.convertToFieldCoordinate(
+                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+            ) else { return nil }
+            let fx = isFlipped ? field.dimensions.width  - fieldCoord.x : fieldCoord.x
+            let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
+            return CGPoint(
+                x: offsetX + (fx / field.dimensions.width)  * drawWidth,
+                y: offsetY + (fy / field.dimensions.length) * drawHeight
+            )
+        }
     }
 
     private func createPath(points: [CGPoint]) -> Path? {
