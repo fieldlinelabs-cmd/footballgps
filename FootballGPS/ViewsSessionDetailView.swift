@@ -352,6 +352,19 @@ struct SessionDetailView: View {
         .onDisappear {
             isPlaying = false
         }
+        .onChange(of: isFlipped) { _, flipped in
+            if let field = currentField {
+                let cnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
+                syncResults = SessionDataManager.computeStyleSync(
+                    gpsData: gpsData,
+                    field: field,
+                    isFlipped: flipped,
+                    sprintCount: cnt,
+                    agilityTurnCount: session.agilityTurnCount,
+                    maxSpeed: session.maxSpeed
+                )
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { isPlaying = false }
         }
