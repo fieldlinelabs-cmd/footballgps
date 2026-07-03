@@ -122,7 +122,7 @@ struct FieldPositioningView: View {
             let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
 
             let x = offsetX + (fx / field.dimensions.width)  * drawWidth
-            let y = offsetY + (fy / field.dimensions.length) * drawHeight
+            let y = offsetY + (1.0 - fy / field.dimensions.length) * drawHeight
 
             return CGPoint(x: x, y: y)
         }
@@ -177,7 +177,7 @@ struct FieldPositioningView: View {
             let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
             return CGPoint(
                 x: offsetX + (fx / field.dimensions.width)  * drawWidth,
-                y: offsetY + (fy / field.dimensions.length) * drawHeight
+                y: offsetY + (1.0 - fy / field.dimensions.length) * drawHeight
             )
         }
     }

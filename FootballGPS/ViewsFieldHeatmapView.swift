@@ -161,7 +161,7 @@ struct HeatmapGridView: View {
                         let color = heatmapColor(for: intensity)
                         let rect = CGRect(
                             x: offsetX + CGFloat(col) * cellWidth,
-                            y: offsetY + CGFloat(row) * cellHeight,
+                            y: offsetY + CGFloat(rows - 1 - row) * cellHeight,
                             width: cellWidth,
                             height: cellHeight
                         )
