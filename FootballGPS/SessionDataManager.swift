@@ -62,6 +62,23 @@ class SessionDataManager: ObservableObject {
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index].sprintCount = count
         }
+
+        // rawMotion ファイルがセッションより先に届いていた場合、アジリティデータを反映
+        if let agility = loadAgilityData(sessionId: session.id),
+           let idx = sessions.firstIndex(where: { $0.id == session.id }) {
+            let turnCount = agility.events.count
+            let score: Int
+            if agility.events.isEmpty {
+                score = 0
+            } else {
+                let avgPeak = agility.events.map(\.magnitude).reduce(0, +) / Double(agility.events.count)
+                score = max(0, min(100, Int((avgPeak - 2.5) / (6.0 - 2.5) * 100)))
+            }
+            sessions[idx].agilityTurnCount = turnCount
+            sessions[idx].agilityScore = score
+            print("✅ 事前受信済みアジリティデータを適用: \(turnCount)回, スコア=\(score)")
+        }
+
         persistSessions()
 
         print("✅ セッション保存完了: \(session.name), スプリント: \(count)回")
@@ -631,7 +648,7 @@ class SessionDataManager: ObservableObject {
                 score = 0
             } else {
                 let avgPeak = events.map(\.magnitude).reduce(0, +) / Double(events.count)
-                score = max(0, min(100, Int((avgPeak - 8.0) / (15.0 - 8.0) * 100)))
+                score = max(0, min(100, Int((avgPeak - 2.5) / (6.0 - 2.5) * 100)))
             }
 
             await MainActor.run {
@@ -647,9 +664,9 @@ class SessionDataManager: ObservableObject {
         }
     }
 
-    /// B方式ヒステリシス検出: 開始閾値 8.0G / 終了閾値 0.5G が 0.5秒継続
+    /// B方式ヒステリシス検出: 開始閾値 2.5G / 終了閾値 0.5G が 0.5秒継続
     private static nonisolated func detectAgilityEventsFromRawMotion(_ samples: [RawMotionSample]) -> [AgilityEvent] {
-        let startThreshold = 8.0
+        let startThreshold = 2.5
         let endThreshold = 0.5
         let quietDuration = 0.5
 
