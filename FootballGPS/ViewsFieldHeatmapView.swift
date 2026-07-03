@@ -235,7 +235,7 @@ private struct ThirdLinesOverlay: View {
                 }
             }
 
-            Text(String(format: "守備\n%.0f%%", thirdRatios.defensive))
+            Text(String(format: "攻撃\n%.0f%%", thirdRatios.attacking))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
@@ -249,7 +249,7 @@ private struct ThirdLinesOverlay: View {
                 .shadow(color: .black.opacity(0.6), radius: 2)
                 .position(x: midX, y: offsetY + drawHeight / 2)
 
-            Text(String(format: "攻撃\n%.0f%%", thirdRatios.attacking))
+            Text(String(format: "守備\n%.0f%%", thirdRatios.defensive))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
