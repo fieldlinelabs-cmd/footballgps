@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <boolean>false</boolean>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>フィールドの位置を地図に設定するために現在地を使用します。</string>
     <key>SUPABASE_URL</key>
