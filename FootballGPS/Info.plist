@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>ITSAppUsesNonExemptEncryption</key>
-    <boolean>false</boolean>
+    <false/>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>フィールドの位置を地図に設定するために現在地を使用します。</string>
     <key>SUPABASE_URL</key>

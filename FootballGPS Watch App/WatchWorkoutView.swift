@@ -302,6 +302,8 @@ struct SummaryView: View {
                         ? String(format: "%.0f bpm", workoutManager.heartRate) : "--")
                     SummaryRow(label: "カロリー", value: workoutManager.activeCalories > 0
                         ? String(format: "%.0f kcal", workoutManager.activeCalories) : "--")
+                    SummaryRow(label: "最大加速度", value: workoutManager.peakAcceleration > 0
+                        ? String(format: "%.2f G", workoutManager.peakAcceleration) : "--")
                 }
                 .font(.caption)
                 .padding(8)

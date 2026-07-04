@@ -35,6 +35,7 @@ class WorkoutManager: NSObject, ObservableObject {
 
     // GPS記録データ（デバッグ用に公開）
     @Published var gpsPoints: [GPSPoint] = []
+    @Published var peakAcceleration: Double = 0 // G（最大加速度）
 
     // MARK: - Private Properties
 
@@ -355,6 +356,7 @@ class WorkoutManager: NSObject, ObservableObject {
         locations.removeAll()
         gpsPoints.removeAll()
         rawMotionSamples.removeAll()
+        peakAcceleration = 0
         startDate = nil
         totalPausedDuration = 0
         pauseStartDate = nil
@@ -421,7 +423,10 @@ class WorkoutManager: NSObject, ObservableObject {
 
     private func stopMotionRecording() {
         motionManager.stopDeviceMotionUpdates()
-        print("📳 加速度記録停止: \(rawMotionSamples.count) サンプル")
+        peakAcceleration = rawMotionSamples.map {
+            sqrt($0.x * $0.x + $0.y * $0.y + $0.z * $0.z)
+        }.max() ?? 0
+        print("📳 加速度記録停止: \(rawMotionSamples.count) サンプル, ピーク: \(String(format: "%.2f", peakAcceleration))G")
     }
 
     private func rawMotionTempURL(sessionId: String) -> URL {
