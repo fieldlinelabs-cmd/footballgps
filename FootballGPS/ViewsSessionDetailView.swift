@@ -551,6 +551,7 @@ struct SessionDetailView: View {
         let sprintCnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
         let radar = SessionDataManager.computePlayerRadar(
             totalDistance: session.totalDistance,
+            duration: session.duration,
             sprintCount: sprintCnt,
             agilityTurnCount: session.agilityTurnCount,
             staminaDrop: staminaDrop,

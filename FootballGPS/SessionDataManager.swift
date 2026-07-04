@@ -384,18 +384,31 @@ class SessionDataManager: ObservableObject {
     // MARK: - Player Radar Analysis
 
     /// 6軸評価からレーダーチャートデータとプレイヤータイプを計算
-    /// 各軸は固定基準値で 0…1 に正規化、最高スコアの軸で称号を決定
+    ///
+    /// 参照値（アマチュアサッカー研究値ベース）:
+    ///   走力  : 100 m/分（90分換算 9,000m）
+    ///   スプリント: 0.4 回/分（90分換算 36回）
+    ///   アジリティ: 3.0 回/分（閾値調整後に再検討）
+    ///   スタミナ : スタミナ低下率（時間非依存）
+    ///   高強度  : 高強度HR時間率 40%（時間非依存）
+    ///   最高速度 : 8.0 m/s ≈ 29 km/h（時間非依存）
     static func computePlayerRadar(
         totalDistance: Double,
+        duration: TimeInterval,
         sprintCount: Int,
         agilityTurnCount: Int?,
         staminaDrop: Double?,
         hrIntensityRatio: Double?,
         maxSpeed: Double
     ) -> PlayerRadarData {
-        let distanceScore  = min(totalDistance / 10000.0, 1.0)
-        let sprintScore    = min(Double(sprintCount) / 30.0, 1.0)
-        let agilityScore   = min(Double(agilityTurnCount ?? 0) / 50.0, 1.0)
+        let minutes = max(duration / 60.0, 1.0)
+
+        // 時間正規化メトリクス（分あたり実績 ÷ 分あたり参照値）
+        let distanceScore  = min((totalDistance / minutes) / 100.0, 1.0)
+        let sprintScore    = min((Double(sprintCount) / minutes) / 0.4, 1.0)
+        let agilityScore   = min((Double(agilityTurnCount ?? 0) / minutes) / 3.0, 1.0)
+
+        // 時間非依存メトリクス
         let staminaScore   = min(staminaDrop ?? 0, 1.0)
         let intensityScore = min((hrIntensityRatio ?? 0) / 40.0, 1.0)
         let topSpeedScore  = min(maxSpeed / 8.0, 1.0)  // 8 m/s ≈ 29 km/h = 1.0
