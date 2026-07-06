@@ -63,21 +63,23 @@ class SessionDataManager: ObservableObject {
             sessions[index].sprintCount = count
         }
 
-        // rawMotion ファイルがセッションより先に届いていた場合、アジリティデータを反映
-        if let agility = loadAgilityData(sessionId: session.id),
-           let idx = sessions.firstIndex(where: { $0.id == session.id }) {
-            let turnCount = agility.events.count
-            let score: Int
-            if agility.events.isEmpty {
-                score = 0
-            } else {
-                let avgPeak = agility.events.map(\.magnitude).reduce(0, +) / Double(agility.events.count)
-                score = max(0, min(100, Int((avgPeak - 2.5) / (6.0 - 2.5) * 100)))
-            }
-            sessions[idx].agilityTurnCount = turnCount
-            sessions[idx].agilityScore = score
-            print("✅ 事前受信済みアジリティデータを適用: \(turnCount)回, スコア=\(score)")
+        // GPS データからアジリティ（方向転換）を検出
+        let agilityEvents = SessionDataManager.detectAgilityEventsFromGPS(gpsData.points)
+        let agilityTurnCount = agilityEvents.count
+        let agilityScore: Int
+        if agilityEvents.isEmpty {
+            agilityScore = 0
+        } else {
+            let avgAngle = agilityEvents.map(\.magnitude).reduce(0, +) / Double(agilityEvents.count)
+            // 60°=0点、180°=100点でスコア化
+            agilityScore = max(0, min(100, Int((avgAngle - 60.0) / 120.0 * 100)))
         }
+        if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
+            sessions[idx].agilityTurnCount = agilityTurnCount
+            sessions[idx].agilityScore = agilityScore
+        }
+        saveAgilityData(AgilityData(sessionId: session.id, events: agilityEvents))
+        print("✅ GPSアジリティ検出完了: \(agilityTurnCount)回, スコア=\(agilityScore)")
 
         persistSessions()
 
@@ -637,44 +639,72 @@ class SessionDataManager: ObservableObject {
         try? FileManager.default.removeItem(at: agilityFileURL(for: sessionId))
     }
 
-    /// Watch から受信した rawMotion JSON ファイルを処理してアジリティイベントを検出・保存
+    /// Watch から受信した rawMotion JSON ファイルを受け取る
+    /// アジリティ検出は GPS ベースに移行したため、ここでは受信ログのみ記録
     func processRawMotionFile(_ srcURL: URL, sessionId: String) {
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            guard let data = try? Data(contentsOf: srcURL) else {
+        Task.detached(priority: .utility) {
+            guard let data = try? Data(contentsOf: srcURL),
+                  let samples = try? JSONDecoder().decode([RawMotionSample].self, from: data) else {
                 print("❌ rawMotion ファイル読み込み失敗: \(srcURL.lastPathComponent)")
                 return
             }
-            guard let samples = try? JSONDecoder().decode([RawMotionSample].self, from: data) else {
-                print("❌ rawMotion JSON デコード失敗")
-                return
-            }
-            print("📳 rawMotion サンプル数: \(samples.count)")
-
-            let events = Self.detectAgilityEventsFromRawMotion(samples)
-            let agilityData = AgilityData(sessionId: sessionId, events: events)
-
-            // アジリティスコアを計算（0–100 整数）
-            let turnCount = events.count
-            let score: Int
-            if events.isEmpty {
-                score = 0
-            } else {
-                let avgPeak = events.map(\.magnitude).reduce(0, +) / Double(events.count)
-                score = max(0, min(100, Int((avgPeak - 2.5) / (6.0 - 2.5) * 100)))
-            }
-
-            await MainActor.run {
-                self.saveAgilityData(agilityData)
-                // セッションに反映
-                if let idx = self.sessions.firstIndex(where: { $0.id == sessionId }) {
-                    self.sessions[idx].agilityTurnCount = turnCount
-                    self.sessions[idx].agilityScore = score
-                    self.persistSessions()
-                }
-                print("✅ アジリティ処理完了: \(turnCount)回, スコア=\(score)")
-            }
+            print("📳 rawMotion 受信: \(samples.count) サンプル (sessionId=\(sessionId)) ※アジリティはGPS判定済み")
         }
+    }
+
+    /// GPS 点列から方向転換イベントを検出
+    ///
+    /// 条件:
+    ///   - 速度 ≥ 1.5 m/s（ジョギング以上）
+    ///   - 方向変化角 ≥ 60°
+    ///   - GPS精度 ≤ 20 m
+    ///   - イベント間隔 ≥ 1.5 秒（連続誤検知防止）
+    ///
+    /// magnitude には方向変化角（度）を格納する。スコアは 60°=0, 180°=100 で線形換算。
+    static func detectAgilityEventsFromGPS(_ points: [GPSPoint]) -> [AgilityEvent] {
+        guard points.count >= 3 else { return [] }
+
+        let minSpeed: Double        = 1.5   // m/s
+        let minAngleDeg: Double     = 60.0  // 度
+        let minEventInterval: TimeInterval = 1.5  // 秒
+        let maxAccuracy: Double     = 20.0  // m
+        let latToM: Double          = 111_000.0
+
+        var events: [AgilityEvent] = []
+        var lastEventTime: Date?   = nil
+
+        for i in 1..<(points.count - 1) {
+            let prev = points[i - 1]
+            let curr = points[i]
+            let next = points[i + 1]
+
+            guard curr.horizontalAccuracy <= maxAccuracy else { continue }
+            guard curr.speed >= minSpeed else { continue }
+            if let last = lastEventTime,
+               curr.timestamp.timeIntervalSince(last) < minEventInterval { continue }
+
+            // 経度を実距離（m）に換算してから角度計算
+            let lonToM = 111_000.0 * cos(curr.latitude * .pi / 180.0)
+            let dx1 = (curr.longitude - prev.longitude) * lonToM
+            let dy1 = (curr.latitude  - prev.latitude)  * latToM
+            let dx2 = (next.longitude - curr.longitude) * lonToM
+            let dy2 = (next.latitude  - curr.latitude)  * latToM
+
+            let mag1 = sqrt(dx1 * dx1 + dy1 * dy1)
+            let mag2 = sqrt(dx2 * dx2 + dy2 * dy2)
+            guard mag1 > 0.1, mag2 > 0.1 else { continue }
+
+            let cosAngle = min(max((dx1 * dx2 + dy1 * dy2) / (mag1 * mag2), -1.0), 1.0)
+            let angleDeg = acos(cosAngle) * 180.0 / .pi
+
+            guard angleDeg >= minAngleDeg else { continue }
+
+            events.append(AgilityEvent(timestamp: curr.timestamp, magnitude: angleDeg))
+            lastEventTime = curr.timestamp
+        }
+
+        print("📍 GPSアジリティ検出: \(events.count)回 (対象点数: \(points.count))")
+        return events
     }
 
     /// B方式ヒステリシス検出: 開始閾値 2.5G / 終了閾値 0.5G が 0.5秒継続
