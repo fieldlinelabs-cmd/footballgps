@@ -1075,7 +1075,7 @@ private struct RadarChartView: View {
             maxLabel: "低下なし",
             maxFull: "後半の移動量 ÷ 前半の移動量 = 1.0（低下なし）",
             description: "後半の移動量が前半と比べてどれだけ維持できているかを示します。1.0が低下なし、値が低いほど後半に疲労が出ています。",
-            reference: "基準 1.0（低下なし）"
+            reference: ""
         ),
         AxisDetail(
             maxLabel: "40%",
@@ -1214,9 +1214,16 @@ private struct RadarChartView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(detail.reference)
-                            .font(.caption2.bold())
-                            .foregroundStyle(.blue)
+                        if !detail.reference.isEmpty {
+                            HStack(spacing: 4) {
+                                Text("アマ平均：")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.blue)
+                                Text(detail.reference)
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                            }
+                        }
                     }
                     .padding(12)
                     .background(Color(.systemBackground))
