@@ -582,11 +582,7 @@ struct SessionDetailView: View {
                     value: session.agilityTurnCount.map { "\($0)回" } ?? "--",
                     icon: "arrow.triangle.turn.up.right.diamond.fill"
                 )
-                StatisticRow(
-                    label: "アジリティスコア",
-                    value: session.agilityScore.map { "\($0)" } ?? "--",
-                    icon: "star.fill"
-                )
+
                 if let bpm = session.heartRate, bpm > 0 {
                     StatisticRow(label: "心拍数", value: String(format: "%.0f bpm", bpm), icon: "heart.fill")
                 }
