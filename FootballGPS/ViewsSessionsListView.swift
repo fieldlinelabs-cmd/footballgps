@@ -69,20 +69,20 @@ struct SessionsListView: View {
                             } label: {
                                 Label("削除", systemImage: "trash")
                             }
-                            let isExcluded = session.duration < 300 || session.excludeFromAverage
+                            let isExcluded = session.duration < 300 || session.isExcludedFromAverage
                             if session.duration >= 300 {
                                 Button {
                                     dataManager.updateExcludeFromAverage(
                                         for: session.id,
-                                        excluded: !session.excludeFromAverage
+                                        excluded: !session.isExcludedFromAverage
                                     )
                                 } label: {
                                     Label(
-                                        session.excludeFromAverage ? "平均に含める" : "平均から除外",
-                                        systemImage: session.excludeFromAverage ? "checkmark.circle" : "minus.circle"
+                                        session.isExcludedFromAverage ? "平均に含める" : "平均から除外",
+                                        systemImage: session.isExcludedFromAverage ? "checkmark.circle" : "minus.circle"
                                     )
                                 }
-                                .tint(session.excludeFromAverage ? .green : .orange)
+                                .tint(session.isExcludedFromAverage ? .green : .orange)
                             }
                         }
                     }
@@ -147,7 +147,7 @@ struct SessionRow: View {
 
     // 自己平均から除外されるか（5分未満 or 手動除外）
     private var isExcluded: Bool {
-        session.duration < 300 || session.excludeFromAverage
+        session.duration < 300 || session.isExcludedFromAverage
     }
 
     var body: some View {
@@ -166,7 +166,7 @@ struct SessionRow: View {
                         .background(Color.gray.opacity(0.2))
                         .foregroundStyle(.secondary)
                         .cornerRadius(4)
-                } else if session.excludeFromAverage {
+                } else if session.isExcludedFromAverage {
                     Text("除外中")
                         .font(.caption2)
                         .padding(.horizontal, 5)

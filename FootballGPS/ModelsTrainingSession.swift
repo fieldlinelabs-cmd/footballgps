@@ -46,8 +46,11 @@ struct TrainingSession: Identifiable, Codable {
     var staminaDrop: Double?      // 後半スタミナ低下率（0…1）
     var hrIntensityRatio: Double? // 高強度HR割合（0…100%）
 
-    // 自己平均から手動除外するフラグ（5分未満は自動除外されるため通常は false）
-    var excludeFromAverage: Bool = false
+    // 自己平均から手動除外するフラグ（nil = false として扱う、旧データとの後方互換用）
+    var excludeFromAverage: Bool?
+
+    /// 自己平均から除外されるか（手動 or 5分未満）
+    var isExcludedFromAverage: Bool { excludeFromAverage ?? false }
     
     enum SessionVisibility: String, Codable {
         case `public` = "public"
@@ -76,7 +79,7 @@ struct TrainingSession: Identifiable, Codable {
         agilityScore: Int? = nil,
         staminaDrop: Double? = nil,
         hrIntensityRatio: Double? = nil,
-        excludeFromAverage: Bool = false
+        excludeFromAverage: Bool? = nil
     ) {
         self.id = id
         self.userId = userId

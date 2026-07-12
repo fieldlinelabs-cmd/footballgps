@@ -947,7 +947,7 @@ struct PlayerRadarSection: View {
 
     // 案C: 過去セッションの自己平均（5分未満・手動除外は対象外）
     private var personalAvg: [Double]? {
-        let eligible = sessions.filter { $0.duration >= 300 && !$0.excludeFromAverage }
+        let eligible = sessions.filter { $0.duration >= 300 && !$0.isExcludedFromAverage }
         guard eligible.count >= 2 else { return nil }
         let radars = eligible.map { s in
             SessionDataManager.computePlayerRadar(
