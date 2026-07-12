@@ -319,6 +319,79 @@ struct PlayerRadarData {
     let overallScore: Double  // 0…100（6軸平均）
 }
 
+// MARK: - AI監督フィードバック（§20）
+
+/// `ai-coach-feedback` Edge Functionの生成結果
+struct AICoachFeedbackResult: Decodable {
+    let positive: String
+    let improvement: String
+    let summary: String
+    let personaRecognized: Bool
+}
+
+/// `ai_coach_feedbacks` テーブルの1行（履歴表示用）
+struct AICoachFeedbackRow: Decodable, Identifiable {
+    let id: UUID
+    let persona: String
+    let positive: String
+    let improvement: String
+    let summary: String
+    let personaRecognized: Bool
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case persona
+        case positive
+        case improvement
+        case summary
+        case personaRecognized = "persona_recognized"
+        case createdAt = "created_at"
+    }
+}
+
+/// `ai-coach-feedback` / `create-ad-ticket` Edge Functionが返すエラーコード（§20.5, §20.6）
+enum AICoachFeedbackError: String, Decodable, Error {
+    case ticketNotVerified      = "ticket_not_verified"
+    case ticketExpired          = "ticket_expired"
+    case ticketExhausted        = "ticket_exhausted"
+    case invalidTicket          = "invalid_ticket"
+    case dailyLimitReached      = "daily_limit_reached"
+    case contentBlocked         = "content_blocked"
+    case unauthorized
+    case invalidPersona         = "invalid_persona"
+    case invalidSessionSummary  = "invalid_session_summary"
+    case invalidParams          = "invalid_params"
+    case geminiError            = "gemini_error"
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        self = AICoachFeedbackError(rawValue: raw) ?? .unknown
+    }
+
+    /// §20.7 のUI仕様に対応するユーザー向けメッセージ
+    var userMessage: String {
+        switch self {
+        case .ticketNotVerified, .invalidTicket:
+            return "広告視聴の確認ができませんでした。もう一度お試しください。"
+        case .ticketExpired, .ticketExhausted:
+            return "広告視聴の有効期限が切れました。もう一度広告を見てお試しください。"
+        case .dailyLimitReached:
+            return "本日の無料生成枠を使い切りました。しばらくしてから広告視聴で分析するか、翌日以降にお試しください。"
+        case .contentBlocked:
+            return "不適切な内容が含まれていたため生成できませんでした。監督名を確認してください。"
+        case .invalidPersona, .invalidSessionSummary, .invalidParams:
+            return "入力内容を確認してください。"
+        case .unauthorized:
+            return "認証エラーが発生しました。アプリを再起動してお試しください。"
+        case .geminiError, .unknown:
+            return "分析中にエラーが発生しました。もう一度お試しください。"
+        }
+    }
+}
+
 #if DEBUG
 /// アジリティキャリブレーション用センサーサンプル
 struct CalibrationSample: Codable {

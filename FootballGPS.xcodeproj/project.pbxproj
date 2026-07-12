@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		2128EA812FEF33F4007DA2B3 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 2128EA802FEF33F4007DA2B3 /* Supabase */; };
 		21CC99CF2F161A9C00963099 /* FootballGPS Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 215786B22F10F08300E3541D /* FootballGPS Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		59AD80178604D70A8BC89053 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = 5D32878304E6A7FF2A62A05A /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -138,6 +139,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2128EA812FEF33F4007DA2B3 /* Supabase in Frameworks */,
+				59AD80178604D70A8BC89053 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -232,6 +234,7 @@
 			name = FootballGPS;
 			packageProductDependencies = (
 				2128EA802FEF33F4007DA2B3 /* Supabase */,
+				5D32878304E6A7FF2A62A05A /* GoogleMobileAds */,
 			);
 			productName = FootballGPS;
 			productReference = 21A4CB6B2EE8EBAA0004C8F0 /* FootballGPS.app */;
@@ -320,6 +323,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				2128EA7F2FEF30DE007DA2B3 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				7436C507513A1B825B82A790 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 21A4CB6C2EE8EBAA0004C8F0 /* Products */;
@@ -840,6 +844,14 @@
 				minimumVersion = 2.5.1;
 			};
 		};
+		7436C507513A1B825B82A790 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -847,6 +859,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 2128EA7F2FEF30DE007DA2B3 /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Supabase;
+		};
+		5D32878304E6A7FF2A62A05A /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7436C507513A1B825B82A790 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

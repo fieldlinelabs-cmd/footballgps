@@ -433,6 +433,38 @@ class SessionDataManager: ObservableObject {
         )
     }
 
+    // MARK: - AI監督フィードバック（§20.2）
+
+    /// AI監督フィードバック用のセッションサマリーテキストを生成する。
+    /// GPS生データは渡さず、既に計算済みの統計値をテキストに整形するだけで、
+    /// 新たな計算は行わない（§20.2）。
+    static func buildFeedbackSummaryText(
+        session: TrainingSession,
+        thirdRatios: (defensive: Double, middle: Double, attacking: Double),
+        staminaDropRate: Double?,
+        radar: PlayerRadarData
+    ) -> String {
+        var lines: [String] = []
+        lines.append("- 総移動距離: \(Int(session.totalDistance))m")
+        lines.append(String(format: "- 最高速度: %.1f m/s", session.maxSpeed))
+        lines.append(String(format: "- 平均速度: %.1f m/s", session.avgSpeed))
+        if let sprintCount = session.sprintCount {
+            lines.append("- スプリント回数: \(sprintCount)回")
+        }
+        lines.append(String(
+            format: "- サード別滞在割合: 守備%.0f%% / 中盤%.0f%% / 攻撃%.0f%%",
+            thirdRatios.defensive, thirdRatios.middle, thirdRatios.attacking
+        ))
+        if let staminaDropRate {
+            lines.append(String(
+                format: "- 後半の運動量: 前半比%.0f%%（後半平均/前半平均の走行距離比）",
+                staminaDropRate * 100
+            ))
+        }
+        lines.append("- プレイヤータイプ: \(radar.playerType.rawValue)（総合スコア\(Int(radar.overallScore))点）")
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Heart Rate Intensity Analysis
 
     /// 年齢から最大心拍数を推定

@@ -141,6 +141,79 @@ class SupabaseManager {
         let medianAgilityG: Double?
     }
 
+    // MARK: - AI監督フィードバック（§20）
+
+    /// 広告表示前に呼び、生成の「予約チケット」を発行する（§20.5.1）
+    func createAdTicket(localSessionId: String, persona: String) async throws -> String {
+        struct RequestBody: Encodable {
+            let localSessionId: String
+            let persona: String
+        }
+        struct ResponseBody: Decodable {
+            let ticketId: String
+        }
+        let response: ResponseBody = try await client.functions.invoke(
+            "create-ad-ticket",
+            options: FunctionInvokeOptions(
+                body: RequestBody(localSessionId: localSessionId, persona: persona)
+            )
+        )
+        return response.ticketId
+    }
+
+    /// AI監督フィードバックを生成する（§20.5.3）。`ticketId` が nil の場合は fail-open
+    /// （広告なし、1日3回まで）として扱われる。
+    func fetchAICoachFeedback(
+        ticketId: String?,
+        localSessionId: String,
+        persona: String,
+        sessionSummary: String
+    ) async throws -> AICoachFeedbackResult {
+        struct RequestBody: Encodable {
+            let ticketId: String?
+            let localSessionId: String
+            let persona: String
+            let sessionSummary: String
+        }
+        struct ErrorBody: Decodable {
+            let error: AICoachFeedbackError
+        }
+
+        do {
+            return try await client.functions.invoke(
+                "ai-coach-feedback",
+                options: FunctionInvokeOptions(
+                    body: RequestBody(
+                        ticketId: ticketId,
+                        localSessionId: localSessionId,
+                        persona: persona,
+                        sessionSummary: sessionSummary
+                    )
+                )
+            )
+        } catch let error as FunctionsError {
+            if case .httpError(_, let data) = error,
+               let body = try? JSONDecoder().decode(ErrorBody.self, from: data) {
+                throw body.error
+            }
+            throw error
+        }
+    }
+
+    /// セッション×監督の生成履歴を新しい順に取得する（履歴チップ表示用、§20.6）。
+    /// 広告・API呼び出しを伴わない無料の再閲覧。
+    func fetchCachedFeedbacks(localSessionId: String) async throws -> [AICoachFeedbackRow] {
+        guard let userId = currentUserId else { return [] }
+        return try await client
+            .from("ai_coach_feedbacks")
+            .select()
+            .eq("user_id", value: userId)
+            .eq("local_session_id", value: localSessionId)
+            .order("created_at", ascending: false)
+            .execute()
+            .value
+    }
+
     // MARK: - Private Helpers
 
     private func isoDateString(_ date: Date) -> String {

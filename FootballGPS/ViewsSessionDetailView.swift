@@ -620,6 +620,17 @@ struct SessionDetailView: View {
                 .padding(.horizontal)
             PlayerRadarSection(radar: radar, sessions: dataManager.sessions)
 
+            // AI監督フィードバック（§20.7: プレイヤータイプ直後・プロスタイル診断の前に配置）
+            AICoachFeedbackSection(
+                session: session,
+                sessionSummary: SessionDataManager.buildFeedbackSummaryText(
+                    session: session,
+                    thirdRatios: thirdRatios,
+                    staminaDropRate: staminaDrop,
+                    radar: radar
+                )
+            )
+
             // プロスタイル診断
             if !syncResults.isEmpty {
                 Text("プロスタイル診断")
@@ -851,6 +862,222 @@ private struct TimelineBucketCard: View {
         .background(Color(.systemBackground))
         .cornerRadius(10)
         .shadow(color: .black.opacity(0.06), radius: 2)
+    }
+}
+
+// MARK: - AI監督フィードバック（§20）
+
+struct AICoachFeedbackSection: View {
+    let session: TrainingSession
+    let sessionSummary: String
+
+    @ObservedObject private var adManager = RewardedAdManager.shared
+    @State private var personaInput: String = ""
+    @State private var isGenerating = false
+    @State private var currentResult: AICoachFeedbackResult?
+    @State private var currentPersona: String = ""
+    @State private var history: [AICoachFeedbackRow] = []
+    @State private var errorMessage: String?
+    @State private var showNoAdNotice = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("AI監督フィードバック")
+                .font(.headline)
+
+            Text("監督名やチーム名を入力すると、その指導スタイルになりきったAIが今回のプレーを分析します。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("例: ペップ・グアルディオラ", text: $personaInput)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isGenerating)
+
+            Button {
+                Task { await generate(persona: personaInput) }
+            } label: {
+                Group {
+                    if isGenerating {
+                        ProgressView()
+                    } else {
+                        Text("広告を見て分析結果を見る")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(personaInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isGenerating)
+
+            if showNoAdNotice {
+                Text("広告が表示できなかったため、そのまま分析します")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if let result = currentResult {
+                resultCards(result: result, persona: currentPersona)
+            }
+
+            if !history.isEmpty {
+                historyChips
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+        .padding(.horizontal)
+        .onAppear {
+            adManager.preload()
+            Task { await loadHistory() }
+        }
+    }
+
+    @ViewBuilder
+    private func resultCards(result: AICoachFeedbackResult, persona: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !result.personaRecognized {
+                Text("『\(persona)』に関する十分な情報がないため、一般的な指導者の視点からの分析です")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "hand.thumbsup.fill")
+                    .foregroundStyle(.green)
+                Text(result.positive)
+                    .font(.subheadline)
+            }
+            .padding()
+            .background(Color.green.opacity(0.12))
+            .cornerRadius(10)
+
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "arrow.up.forward.circle.fill")
+                    .foregroundStyle(.orange)
+                Text(result.improvement)
+                    .font(.subheadline)
+            }
+            .padding()
+            .background(Color.orange.opacity(0.12))
+            .cornerRadius(10)
+
+            Button("別の切り口で再生成") {
+                Task { await generate(persona: persona) }
+            }
+            .font(.caption)
+            .disabled(isGenerating)
+
+            Text("AIによる創作コメントであり、実在の人物・チームの実際の見解ではありません")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var historyChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(history) { row in
+                    Button {
+                        currentResult = AICoachFeedbackResult(
+                            positive: row.positive,
+                            improvement: row.improvement,
+                            summary: row.summary,
+                            personaRecognized: row.personaRecognized
+                        )
+                        currentPersona = row.persona
+                        personaInput = row.persona
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text(row.persona)
+                                .font(.caption2)
+                            Text(row.createdAt, style: .time)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.systemGray5))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func generate(persona: String) async {
+        let trimmed = persona.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        isGenerating = true
+        errorMessage = nil
+        showNoAdNotice = false
+        defer { isGenerating = false }
+
+        guard let viewController = UIViewController.currentForPresentation else {
+            errorMessage = "画面の準備ができていません。もう一度お試しください。"
+            return
+        }
+
+        do {
+            let ticketId = try await SupabaseManager.shared.createAdTicket(
+                localSessionId: session.id,
+                persona: trimmed
+            )
+
+            let presentResult = await adManager.presentAndWaitForReward(
+                ticketId: ticketId,
+                from: viewController
+            )
+
+            switch presentResult {
+            case .rewarded:
+                try await fetchWithFreeRetry(ticketId: ticketId, persona: trimmed)
+            case .notRewarded:
+                break // 広告を最後まで見なかったので何もしない
+            case .noFill:
+                showNoAdNotice = true
+                try await fetchWithFreeRetry(ticketId: nil, persona: trimmed)
+            }
+        } catch let error as AICoachFeedbackError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = "分析中にエラーが発生しました。もう一度お試しください。"
+        }
+    }
+
+    /// 広告視聴後にAPI呼び出しが失敗した場合、同じticketで無料の1回だけ即時リトライする（§20.6）。
+    /// Edge Function側は成功時のみticketを消費するため、失敗時の再送は追加の広告視聴を必要としない。
+    private func fetchWithFreeRetry(ticketId: String?, persona: String) async throws {
+        do {
+            try await fetchAndApply(ticketId: ticketId, persona: persona)
+        } catch {
+            try await fetchAndApply(ticketId: ticketId, persona: persona)
+        }
+    }
+
+    private func fetchAndApply(ticketId: String?, persona: String) async throws {
+        let result = try await SupabaseManager.shared.fetchAICoachFeedback(
+            ticketId: ticketId,
+            localSessionId: session.id,
+            persona: persona,
+            sessionSummary: sessionSummary
+        )
+        currentResult = result
+        currentPersona = persona
+        await loadHistory()
+    }
+
+    private func loadHistory() async {
+        history = (try? await SupabaseManager.shared.fetchCachedFeedbacks(localSessionId: session.id)) ?? []
     }
 }
 

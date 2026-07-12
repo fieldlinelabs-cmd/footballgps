@@ -6,14 +6,27 @@
 //
 
 import SwiftUI
+import GoogleMobileAds
 
 @main
 struct FootballGPSApp: App {
-    
+
     init() {
         // WatchConnectivityサービスを初期化
         _ = PhoneWatchConnectivityService.shared
-        
+
+        // AI監督フィードバック機能（§20）のリワード広告SDK初期化
+        GADMobileAds.sharedInstance().start(completionHandler: nil)
+
+        // 🧪 実機でテスト広告を受け取るためのテストデバイス登録（シミュレーターは登録不要、
+        // 標準で常にテストモード）。初回の広告リクエスト時にXcodeコンソールへ実機のデバイスIDが
+        // 出力されるので、実機でテストしたくなったらそのIDをここに追加する。
+        #if DEBUG
+        GADMobileAds.sharedInstance().requestConfiguration.testDeviceIdentifiers = [
+            // "ここにXcodeコンソールに出力された実機のデバイスIDを追加",
+        ]
+        #endif
+
         // 🧪 開発用: シミュレーター向けにテストデータを追加
         #if targetEnvironment(simulator)
         addTestDataIfNeeded()
