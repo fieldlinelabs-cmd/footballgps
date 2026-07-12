@@ -945,10 +945,11 @@ struct PlayerRadarSection: View {
     // 走力100m/分・スプリント0.4/分・アジリティ3.0/分・スタミナ・HR高強度40%・最高速度8m/sを基準
     private let referenceA: [Double] = [0.80, 0.75, 0.67, 0.30, 0.75, 0.75]
 
-    // 案C: 過去セッションの自己平均（GPS由来4軸はストレージから算出、HR依存軸は0）
+    // 案C: 過去セッションの自己平均（5分未満・手動除外は対象外）
     private var personalAvg: [Double]? {
-        guard sessions.count >= 2 else { return nil }
-        let radars = sessions.map { s in
+        let eligible = sessions.filter { $0.duration >= 300 && !$0.excludeFromAverage }
+        guard eligible.count >= 2 else { return nil }
+        let radars = eligible.map { s in
             SessionDataManager.computePlayerRadar(
                 totalDistance: s.totalDistance,
                 duration: s.duration,
@@ -959,7 +960,7 @@ struct PlayerRadarSection: View {
                 maxSpeed: s.maxSpeed
             )
         }
-        let n = Double(radars.count)
+        let n = Double(eligible.count)
         return [
             radars.map(\.distance).reduce(0, +) / n,
             radars.map(\.sprint).reduce(0, +) / n,

@@ -873,6 +873,13 @@ class SessionDataManager: ObservableObject {
         persistSessions()
     }
 
+    /// 自己平均への採用フラグを更新
+    func updateExcludeFromAverage(for sessionId: String, excluded: Bool) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].excludeFromAverage = excluded
+        persistSessions()
+    }
+
     /// すべてのデータをクリア（開発用）
     func clearAllData() {
         for session in sessions {

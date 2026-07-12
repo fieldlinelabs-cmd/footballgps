@@ -45,6 +45,9 @@ struct TrainingSession: Identifiable, Codable {
     // セッション詳細閲覧時に算出して永続化する派生メトリクス
     var staminaDrop: Double?      // 後半スタミナ低下率（0…1）
     var hrIntensityRatio: Double? // 高強度HR割合（0…100%）
+
+    // 自己平均から手動除外するフラグ（5分未満は自動除外されるため通常は false）
+    var excludeFromAverage: Bool = false
     
     enum SessionVisibility: String, Codable {
         case `public` = "public"
@@ -72,7 +75,8 @@ struct TrainingSession: Identifiable, Codable {
         agilityTurnCount: Int? = nil,
         agilityScore: Int? = nil,
         staminaDrop: Double? = nil,
-        hrIntensityRatio: Double? = nil
+        hrIntensityRatio: Double? = nil,
+        excludeFromAverage: Bool = false
     ) {
         self.id = id
         self.userId = userId
@@ -94,6 +98,7 @@ struct TrainingSession: Identifiable, Codable {
         self.agilityScore = agilityScore
         self.staminaDrop = staminaDrop
         self.hrIntensityRatio = hrIntensityRatio
+        self.excludeFromAverage = excludeFromAverage
     }
     
     /// デフォルトのセッション名（日時ベース）

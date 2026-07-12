@@ -63,11 +63,27 @@ struct SessionsListView: View {
                         } label: {
                             SessionRow(session: session)
                         }
-                    }
-                    .onDelete { indexSet in
-                        let sessions = groupedSessions[date] ?? []
-                        indexSet.forEach { i in
-                            dataManager.deleteSession(sessions[i])
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                dataManager.deleteSession(session)
+                            } label: {
+                                Label("削除", systemImage: "trash")
+                            }
+                            let isExcluded = session.duration < 300 || session.excludeFromAverage
+                            if session.duration >= 300 {
+                                Button {
+                                    dataManager.updateExcludeFromAverage(
+                                        for: session.id,
+                                        excluded: !session.excludeFromAverage
+                                    )
+                                } label: {
+                                    Label(
+                                        session.excludeFromAverage ? "平均に含める" : "平均から除外",
+                                        systemImage: session.excludeFromAverage ? "checkmark.circle" : "minus.circle"
+                                    )
+                                }
+                                .tint(session.excludeFromAverage ? .green : .orange)
+                            }
                         }
                     }
                 } header: {
@@ -128,16 +144,40 @@ struct SessionsListView: View {
 
 struct SessionRow: View {
     let session: TrainingSession
-    
+
+    // 自己平均から除外されるか（5分未満 or 手動除外）
+    private var isExcluded: Bool {
+        session.duration < 300 || session.excludeFromAverage
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // セッション名と時間
             HStack {
                 Text(session.name)
                     .font(.headline)
-                
+                    .foregroundStyle(isExcluded ? .secondary : .primary)
+
+                if session.duration < 300 {
+                    Text("平均対象外")
+                        .font(.caption2)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.gray.opacity(0.2))
+                        .foregroundStyle(.secondary)
+                        .cornerRadius(4)
+                } else if session.excludeFromAverage {
+                    Text("除外中")
+                        .font(.caption2)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.15))
+                        .foregroundStyle(.orange)
+                        .cornerRadius(4)
+                }
+
                 Spacer()
-                
+
                 Text(formatTime(session.date))
                     .font(.caption)
                     .foregroundStyle(.secondary)
