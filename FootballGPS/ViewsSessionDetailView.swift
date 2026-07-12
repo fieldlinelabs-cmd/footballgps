@@ -337,6 +337,12 @@ struct SessionDetailView: View {
                     gpsPoints: gpsData.points, age: age
                 )
             }
+            // 派生メトリクスが未保存なら算出して永続化（自己平均計算に使用）
+            if session.staminaDrop == nil {
+                let drop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
+                let hrRatio = hrIntensity?.highIntensityRatio
+                dataManager.updateComputedMetrics(for: session.id, staminaDrop: drop, hrIntensityRatio: hrRatio)
+            }
             if let field = currentField {
                 let cnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
                 syncResults = SessionDataManager.computeStyleSync(
@@ -935,8 +941,8 @@ struct PlayerRadarSection: View {
                 duration: s.duration,
                 sprintCount: s.sprintCount ?? 0,
                 agilityTurnCount: s.agilityTurnCount,
-                staminaDrop: nil,
-                hrIntensityRatio: nil,
+                staminaDrop: s.staminaDrop,
+                hrIntensityRatio: s.hrIntensityRatio,
                 maxSpeed: s.maxSpeed
             )
         }

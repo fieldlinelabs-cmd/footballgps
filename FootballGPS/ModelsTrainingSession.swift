@@ -41,6 +41,10 @@ struct TrainingSession: Identifiable, Codable {
     // アジリティ検出結果（nil = 未処理 / rawMotionファイル未着）
     var agilityTurnCount: Int?
     var agilityScore: Int?
+
+    // セッション詳細閲覧時に算出して永続化する派生メトリクス
+    var staminaDrop: Double?      // 後半スタミナ低下率（0…1）
+    var hrIntensityRatio: Double? // 高強度HR割合（0…100%）
     
     enum SessionVisibility: String, Codable {
         case `public` = "public"
@@ -66,7 +70,9 @@ struct TrainingSession: Identifiable, Codable {
         heartRate: Double? = nil,
         activeCalories: Double? = nil,
         agilityTurnCount: Int? = nil,
-        agilityScore: Int? = nil
+        agilityScore: Int? = nil,
+        staminaDrop: Double? = nil,
+        hrIntensityRatio: Double? = nil
     ) {
         self.id = id
         self.userId = userId
@@ -86,6 +92,8 @@ struct TrainingSession: Identifiable, Codable {
         self.activeCalories = activeCalories
         self.agilityTurnCount = agilityTurnCount
         self.agilityScore = agilityScore
+        self.staminaDrop = staminaDrop
+        self.hrIntensityRatio = hrIntensityRatio
     }
     
     /// デフォルトのセッション名（日時ベース）

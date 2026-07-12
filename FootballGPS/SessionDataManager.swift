@@ -865,6 +865,14 @@ class SessionDataManager: ObservableObject {
         persistSessions()
     }
 
+    /// セッション詳細閲覧時に算出した派生メトリクスを永続化
+    func updateComputedMetrics(for sessionId: String, staminaDrop: Double?, hrIntensityRatio: Double?) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].staminaDrop = staminaDrop
+        sessions[index].hrIntensityRatio = hrIntensityRatio
+        persistSessions()
+    }
+
     /// すべてのデータをクリア（開発用）
     func clearAllData() {
         for session in sessions {
