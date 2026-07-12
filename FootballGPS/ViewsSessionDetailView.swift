@@ -1038,10 +1038,44 @@ struct PlayerRadarSection: View {
 }
 
 private struct RadarChartView: View {
-    let values: [Double]          // 6要素、各 0…1（今回）
-    let labels: [String]          // 6要素
-    var referenceA: [Double]? = nil   // 案A: アマチュア平均
-    var personalAvg: [Double]? = nil  // 案C: 自己過去平均
+    let values: [Double]
+    let labels: [String]
+    var referenceA: [Double]? = nil
+    var personalAvg: [Double]? = nil
+
+    @State private var selectedAxisIndex: Int? = nil
+
+    private struct AxisDetail {
+        let description: String
+        let reference: String
+    }
+
+    private let axisDetails: [AxisDetail] = [
+        AxisDetail(
+            description: "プレー中の総移動距離を時間で割った値。フィールドをどれだけ広くカバーできるかを示します。",
+            reference: "基準 100m/分　アマ平均 80m/分"
+        ),
+        AxisDetail(
+            description: "時速20km/h以上のGPSポイントが2点以上続いた回数を時間で割った値。爆発的なダッシュ力を示します。",
+            reference: "基準 0.4回/分　アマ平均 0.3回/分"
+        ),
+        AxisDetail(
+            description: "GPS軌跡で60度以上の方向転換を1.5m/s以上の速度で行った回数を時間で割った値。切り返しの敏捷性を示します。",
+            reference: "基準 3.0回/分　アマ平均 2.0回/分"
+        ),
+        AxisDetail(
+            description: "後半の移動量が前半と比べてどれだけ維持できているかを示します。1.0が低下なし、値が低いほど後半に疲労が出ています。",
+            reference: "基準 1.0（低下なし）"
+        ),
+        AxisDetail(
+            description: "最大心拍数の80%以上で動いた時間の割合。心肺への負荷強度を示します。心拍データが必要です。",
+            reference: "基準 40%　アマ平均 30%"
+        ),
+        AxisDetail(
+            description: "セッション中にGPSで記録した最高速度。スプリント能力の上限を示します。",
+            reference: "基準 8.0m/s（約29km/h）　アマ平均 6.0m/s"
+        ),
+    ]
 
     private func hexagonPath(vals: [Double], cx: CGFloat, cy: CGFloat, r: CGFloat) -> Path {
         var path = Path()
@@ -1064,7 +1098,6 @@ private struct RadarChartView: View {
 
             ZStack {
                 Canvas { ctx, _ in
-                    // グリッドリング（25/50/75/100%）
                     for level in stride(from: 0.25, through: 1.0, by: 0.25) {
                         let ring = hexagonPath(
                             vals: Array(repeating: Double(level), count: 6),
@@ -1072,7 +1105,6 @@ private struct RadarChartView: View {
                         )
                         ctx.stroke(ring, with: .color(.gray.opacity(0.25)), lineWidth: 1)
                     }
-                    // 軸線
                     for i in 0..<6 {
                         let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
                         var path = Path()
@@ -1083,38 +1115,83 @@ private struct RadarChartView: View {
                         ))
                         ctx.stroke(path, with: .color(.gray.opacity(0.25)), lineWidth: 1)
                     }
-
-                    // 案A: アマチュア平均（グレー破線）
                     if let refA = referenceA {
                         let path = hexagonPath(vals: refA, cx: cx, cy: cy, r: radius)
                         ctx.stroke(path, with: .color(.gray.opacity(0.65)),
                                    style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
                     }
-
-                    // 案C: 自己過去平均（緑・半透明）
                     if let hist = personalAvg {
                         let path = hexagonPath(vals: hist, cx: cx, cy: cy, r: radius)
                         ctx.fill(path, with: .color(.green.opacity(0.12)))
                         ctx.stroke(path, with: .color(.green.opacity(0.65)), lineWidth: 1.5)
                     }
-
-                    // 今回データポリゴン（青）
                     let dataPath = hexagonPath(vals: values, cx: cx, cy: cy, r: radius)
                     ctx.fill(dataPath, with: .color(.blue.opacity(0.25)))
                     ctx.stroke(dataPath, with: .color(.blue.opacity(0.75)), lineWidth: 2)
                 }
 
-                // ラベル
+                // タップ可能なラベル
                 ForEach(0..<min(6, labels.count), id: \.self) { i in
                     let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
                     let lr    = radius + 22
-                    Text(labels[i])
-                        .font(.system(size: 10, weight: .medium))
-                        .multilineTextAlignment(.center)
-                        .position(
-                            x: cx + CGFloat(cos(angle)) * lr,
-                            y: cy + CGFloat(sin(angle)) * lr
-                        )
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            selectedAxisIndex = selectedAxisIndex == i ? nil : i
+                        }
+                    } label: {
+                        Text(labels[i])
+                            .font(.system(size: 10, weight: .medium))
+                            .underline(selectedAxisIndex == i)
+                            .foregroundStyle(selectedAxisIndex == i ? Color.blue : Color.primary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .buttonStyle(.plain)
+                    .position(
+                        x: cx + CGFloat(cos(angle)) * lr,
+                        y: cy + CGFloat(sin(angle)) * lr
+                    )
+                }
+
+                // 説明ポップアップ
+                if let idx = selectedAxisIndex, idx < axisDetails.count {
+                    let detail = axisDetails[idx]
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                selectedAxisIndex = nil
+                            }
+                        }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(labels[idx])
+                                .font(.subheadline.bold())
+                            Spacer()
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    selectedAxisIndex = nil
+                                }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Text(detail.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(detail.reference)
+                            .font(.caption2.bold())
+                            .foregroundStyle(.blue)
+                    }
+                    .padding(12)
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(color: .black.opacity(0.15), radius: 6)
+                    .padding(.horizontal, 20)
+                    .position(x: cx, y: cy)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
             }
         }
