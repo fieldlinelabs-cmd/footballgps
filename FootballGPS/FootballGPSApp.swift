@@ -24,7 +24,9 @@ struct FootballGPSApp: App {
         WindowGroup {
             ContentView()
                 .task {
-                    try? await SupabaseManager.shared.ensureAuthenticated()
+                    Task.detached(priority: .background) {
+                        try? await SupabaseManager.shared.ensureAuthenticated()
+                    }
                 }
         }
     }
