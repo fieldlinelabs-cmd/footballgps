@@ -337,11 +337,24 @@ struct SessionDetailView: View {
                     gpsPoints: gpsData.points, age: age
                 )
             }
-            // 派生メトリクスが未保存なら算出して永続化（自己平均計算に使用）
+            // 派生メトリクスが未保存なら算出して永続化し、Supabaseにアップロード（初回閲覧時）
             if session.staminaDrop == nil {
                 let drop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
                 let hrRatio = hrIntensity?.highIntensityRatio
                 dataManager.updateComputedMetrics(for: session.id, staminaDrop: drop, hrIntensityRatio: hrRatio)
+                let sprintCnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
+                let radar = SessionDataManager.computePlayerRadar(
+                    totalDistance: session.totalDistance,
+                    duration: session.duration,
+                    sprintCount: sprintCnt,
+                    agilityTurnCount: session.agilityTurnCount,
+                    staminaDrop: drop,
+                    hrIntensityRatio: hrRatio,
+                    maxSpeed: session.maxSpeed
+                )
+                Task {
+                    try? await SupabaseManager.shared.uploadSessionSummary(session, radar: radar)
+                }
             }
             if let field = currentField {
                 let cnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count

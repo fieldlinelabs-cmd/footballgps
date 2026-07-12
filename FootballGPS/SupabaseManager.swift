@@ -56,7 +56,7 @@ class SupabaseManager {
 
     // MARK: - session_summaries テーブル
 
-    func uploadSessionSummary(_ session: TrainingSession) async throws {
+    func uploadSessionSummary(_ session: TrainingSession, radar: PlayerRadarData) async throws {
         guard let userId = currentUserId else { return }
         let row = SessionSummaryRow(
             userId: userId,
@@ -68,12 +68,21 @@ class SupabaseManager {
             maxSpeedMs: session.maxSpeed,
             avgSpeedMs: session.avgSpeed,
             sprintCount: session.sprintCount,
-            agilityEventCount: nil,
-            agilityPeakG: nil,
+            agilityEventCount: session.agilityTurnCount,
             heartRate: session.heartRate,
-            activeCaloriesKcal: session.activeCalories
+            activeCaloriesKcal: session.activeCalories,
+            staminaDrop: session.staminaDrop,
+            hrIntensityRatio: session.hrIntensityRatio,
+            radarDistance: radar.distance,
+            radarSprint: radar.sprint,
+            radarAgility: radar.agility,
+            radarStamina: radar.stamina,
+            radarIntensity: radar.intensity,
+            radarTopSpeed: radar.topSpeed,
+            radarOverallScore: radar.overallScore,
+            playerType: radar.playerType.rawValue
         )
-        try await client.from("session_summaries").insert(row).execute()
+        try await client.from("session_summaries").upsert(row).execute()
     }
 
     // MARK: - calibration_results テーブル
@@ -168,24 +177,42 @@ class SupabaseManager {
         let avgSpeedMs: Double
         let sprintCount: Int?
         let agilityEventCount: Int?
-        let agilityPeakG: Double?
         let heartRate: Double?
         let activeCaloriesKcal: Double?
+        let staminaDrop: Double?
+        let hrIntensityRatio: Double?
+        let radarDistance: Double
+        let radarSprint: Double
+        let radarAgility: Double
+        let radarStamina: Double
+        let radarIntensity: Double
+        let radarTopSpeed: Double
+        let radarOverallScore: Double
+        let playerType: String
 
         enum CodingKeys: String, CodingKey {
-            case userId             = "user_id"
-            case localSessionId     = "local_session_id"
-            case sessionName        = "session_name"
-            case sessionDate        = "session_date"
-            case durationSeconds    = "duration_seconds"
+            case userId              = "user_id"
+            case localSessionId      = "local_session_id"
+            case sessionName         = "session_name"
+            case sessionDate         = "session_date"
+            case durationSeconds     = "duration_seconds"
             case totalDistanceMeters = "total_distance_meters"
-            case maxSpeedMs         = "max_speed_ms"
-            case avgSpeedMs         = "avg_speed_ms"
-            case sprintCount        = "sprint_count"
-            case agilityEventCount  = "agility_event_count"
-            case agilityPeakG       = "agility_peak_g"
-            case heartRate          = "heart_rate"
-            case activeCaloriesKcal = "active_calories_kcal"
+            case maxSpeedMs          = "max_speed_ms"
+            case avgSpeedMs          = "avg_speed_ms"
+            case sprintCount         = "sprint_count"
+            case agilityEventCount   = "agility_event_count"
+            case heartRate           = "heart_rate"
+            case activeCaloriesKcal  = "active_calories_kcal"
+            case staminaDrop         = "stamina_drop"
+            case hrIntensityRatio    = "hr_intensity_ratio"
+            case radarDistance       = "radar_distance"
+            case radarSprint         = "radar_sprint"
+            case radarAgility        = "radar_agility"
+            case radarStamina        = "radar_stamina"
+            case radarIntensity      = "radar_intensity"
+            case radarTopSpeed       = "radar_top_speed"
+            case radarOverallScore   = "radar_overall_score"
+            case playerType          = "player_type"
         }
     }
 
