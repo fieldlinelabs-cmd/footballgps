@@ -599,7 +599,7 @@ struct SessionDetailView: View {
             Text("プレイヤータイプ")
                 .font(.headline)
                 .padding(.horizontal)
-            PlayerRadarSection(radar: radar)
+            PlayerRadarSection(radar: radar, sessions: dataManager.sessions)
 
             // プロスタイル診断
             if !syncResults.isEmpty {
@@ -915,10 +915,40 @@ struct StyleSyncSection: View {
 
 struct PlayerRadarSection: View {
     let radar: PlayerRadarData
+    let sessions: [TrainingSession]
 
-    private let labels  = ["走力", "スプリント", "アジリティ", "スタミナ", "高強度", "最高速度"]
+    private let labels = ["走力", "スプリント", "アジリティ", "スタミナ", "高強度", "最高速度"]
     private var values: [Double] {
         [radar.distance, radar.sprint, radar.agility, radar.stamina, radar.intensity, radar.topSpeed]
+    }
+
+    // 案A: 研究ベースのアマチュア平均参照値（各軸の参照最大値に対する割合）
+    // 走力100m/分・スプリント0.4/分・アジリティ3.0/分・スタミナ・HR高強度40%・最高速度8m/sを基準
+    private let referenceA: [Double] = [0.80, 0.75, 0.67, 0.30, 0.75, 0.75]
+
+    // 案C: 過去セッションの自己平均（GPS由来4軸はストレージから算出、HR依存軸は0）
+    private var personalAvg: [Double]? {
+        guard sessions.count >= 2 else { return nil }
+        let radars = sessions.map { s in
+            SessionDataManager.computePlayerRadar(
+                totalDistance: s.totalDistance,
+                duration: s.duration,
+                sprintCount: s.sprintCount ?? 0,
+                agilityTurnCount: s.agilityTurnCount,
+                staminaDrop: nil,
+                hrIntensityRatio: nil,
+                maxSpeed: s.maxSpeed
+            )
+        }
+        let n = Double(radars.count)
+        return [
+            radars.map(\.distance).reduce(0, +) / n,
+            radars.map(\.sprint).reduce(0, +) / n,
+            radars.map(\.agility).reduce(0, +) / n,
+            radars.map(\.stamina).reduce(0, +) / n,
+            radars.map(\.intensity).reduce(0, +) / n,
+            radars.map(\.topSpeed).reduce(0, +) / n
+        ]
     }
 
     var body: some View {
@@ -940,8 +970,23 @@ struct PlayerRadarSection: View {
                 }
             }
 
-            RadarChartView(values: values, labels: labels)
-                .frame(height: 220)
+            RadarChartView(
+                values: values,
+                labels: labels,
+                referenceA: referenceA,
+                personalAvg: personalAvg
+            )
+            .frame(height: 220)
+
+            // 凡例
+            HStack(spacing: 16) {
+                RadarLegendItem(color: .blue, dashed: false, label: "今回")
+                if personalAvg != nil {
+                    RadarLegendItem(color: .green, dashed: false, label: "自己平均")
+                }
+                RadarLegendItem(color: .gray, dashed: true, label: "アマ平均(参考)")
+            }
+            .font(.caption2)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -973,8 +1018,23 @@ struct PlayerRadarSection: View {
 }
 
 private struct RadarChartView: View {
-    let values: [Double]   // 6要素、各 0…1
-    let labels: [String]   // 6要素
+    let values: [Double]          // 6要素、各 0…1（今回）
+    let labels: [String]          // 6要素
+    var referenceA: [Double]? = nil   // 案A: アマチュア平均
+    var personalAvg: [Double]? = nil  // 案C: 自己過去平均
+
+    private func hexagonPath(vals: [Double], cx: CGFloat, cy: CGFloat, r: CGFloat) -> Path {
+        var path = Path()
+        for i in 0..<6 {
+            let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
+            let v = i < vals.count ? max(0, min(vals[i], 1.0)) : 0
+            let pt = CGPoint(x: cx + CGFloat(cos(angle)) * r * CGFloat(v),
+                             y: cy + CGFloat(sin(angle)) * r * CGFloat(v))
+            if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+        }
+        path.closeSubpath()
+        return path
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -986,17 +1046,11 @@ private struct RadarChartView: View {
                 Canvas { ctx, _ in
                     // グリッドリング（25/50/75/100%）
                     for level in stride(from: 0.25, through: 1.0, by: 0.25) {
-                        var path = Path()
-                        for i in 0..<6 {
-                            let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
-                            let pt = CGPoint(
-                                x: cx + CGFloat(cos(angle)) * radius * CGFloat(level),
-                                y: cy + CGFloat(sin(angle)) * radius * CGFloat(level)
-                            )
-                            if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
-                        }
-                        path.closeSubpath()
-                        ctx.stroke(path, with: .color(.gray.opacity(0.25)), lineWidth: 1)
+                        let ring = hexagonPath(
+                            vals: Array(repeating: Double(level), count: 6),
+                            cx: cx, cy: cy, r: radius
+                        )
+                        ctx.stroke(ring, with: .color(.gray.opacity(0.25)), lineWidth: 1)
                     }
                     // 軸線
                     for i in 0..<6 {
@@ -1009,18 +1063,23 @@ private struct RadarChartView: View {
                         ))
                         ctx.stroke(path, with: .color(.gray.opacity(0.25)), lineWidth: 1)
                     }
-                    // データポリゴン
-                    var dataPath = Path()
-                    for i in 0..<6 {
-                        let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
-                        let v = i < values.count ? max(0, min(values[i], 1.0)) : 0
-                        let pt = CGPoint(
-                            x: cx + CGFloat(cos(angle)) * radius * CGFloat(v),
-                            y: cy + CGFloat(sin(angle)) * radius * CGFloat(v)
-                        )
-                        if i == 0 { dataPath.move(to: pt) } else { dataPath.addLine(to: pt) }
+
+                    // 案A: アマチュア平均（グレー破線）
+                    if let refA = referenceA {
+                        let path = hexagonPath(vals: refA, cx: cx, cy: cy, r: radius)
+                        ctx.stroke(path, with: .color(.gray.opacity(0.65)),
+                                   style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
                     }
-                    dataPath.closeSubpath()
+
+                    // 案C: 自己過去平均（緑・半透明）
+                    if let hist = personalAvg {
+                        let path = hexagonPath(vals: hist, cx: cx, cy: cy, r: radius)
+                        ctx.fill(path, with: .color(.green.opacity(0.12)))
+                        ctx.stroke(path, with: .color(.green.opacity(0.65)), lineWidth: 1.5)
+                    }
+
+                    // 今回データポリゴン（青）
+                    let dataPath = hexagonPath(vals: values, cx: cx, cy: cy, r: radius)
                     ctx.fill(dataPath, with: .color(.blue.opacity(0.25)))
                     ctx.stroke(dataPath, with: .color(.blue.opacity(0.75)), lineWidth: 2)
                 }
@@ -1038,6 +1097,34 @@ private struct RadarChartView: View {
                         )
                 }
             }
+        }
+    }
+}
+
+private struct RadarLegendItem: View {
+    let color: Color
+    let dashed: Bool
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if dashed {
+                // 破線を模したアイコン
+                HStack(spacing: 1) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Rectangle()
+                            .fill(color.opacity(0.65))
+                            .frame(width: 4, height: 1.5)
+                    }
+                }
+                .frame(width: 14)
+            } else {
+                Circle()
+                    .fill(color.opacity(0.5))
+                    .frame(width: 8, height: 8)
+            }
+            Text(label)
+                .foregroundStyle(color)
         }
     }
 }
