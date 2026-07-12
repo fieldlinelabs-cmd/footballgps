@@ -1046,34 +1046,48 @@ private struct RadarChartView: View {
     @State private var selectedAxisIndex: Int? = nil
 
     private struct AxisDetail {
+        let maxLabel: String   // 軸端に常時表示するMAX値
+        let maxFull: String    // ツールチップに表示する満点の説明
         let description: String
         let reference: String
     }
 
     private let axisDetails: [AxisDetail] = [
         AxisDetail(
+            maxLabel: "100m/分",
+            maxFull: "100m/分（分速100m＝時速6km）",
             description: "プレー中の総移動距離を時間で割った値。フィールドをどれだけ広くカバーできるかを示します。",
-            reference: "基準 100m/分　アマ平均 80m/分"
+            reference: "アマ平均 80m/分"
         ),
         AxisDetail(
+            maxLabel: "0.4回/分",
+            maxFull: "0.4回/分（60分で24回のスプリント）",
             description: "時速20km/h以上のGPSポイントが2点以上続いた回数を時間で割った値。爆発的なダッシュ力を示します。",
-            reference: "基準 0.4回/分　アマ平均 0.3回/分"
+            reference: "アマ平均 0.3回/分"
         ),
         AxisDetail(
+            maxLabel: "3.0回/分",
+            maxFull: "3.0回/分（60分で180回の方向転換）",
             description: "GPS軌跡で60度以上の方向転換を1.5m/s以上の速度で行った回数を時間で割った値。切り返しの敏捷性を示します。",
-            reference: "基準 3.0回/分　アマ平均 2.0回/分"
+            reference: "アマ平均 2.0回/分"
         ),
         AxisDetail(
+            maxLabel: "低下なし",
+            maxFull: "後半の移動量 ÷ 前半の移動量 = 1.0（低下なし）",
             description: "後半の移動量が前半と比べてどれだけ維持できているかを示します。1.0が低下なし、値が低いほど後半に疲労が出ています。",
             reference: "基準 1.0（低下なし）"
         ),
         AxisDetail(
+            maxLabel: "40%",
+            maxFull: "総プレー時間の40%が最大心拍数の80%以上",
             description: "最大心拍数の80%以上で動いた時間の割合。心肺への負荷強度を示します。心拍データが必要です。",
-            reference: "基準 40%　アマ平均 30%"
+            reference: "アマ平均 30%"
         ),
         AxisDetail(
+            maxLabel: "8.0m/s",
+            maxFull: "8.0m/s（約29km/h）",
             description: "セッション中にGPSで記録した最高速度。スプリント能力の上限を示します。",
-            reference: "基準 8.0m/s（約29km/h）　アマ平均 6.0m/s"
+            reference: "アマ平均 6.0m/s"
         ),
     ]
 
@@ -1130,20 +1144,27 @@ private struct RadarChartView: View {
                     ctx.stroke(dataPath, with: .color(.blue.opacity(0.75)), lineWidth: 2)
                 }
 
-                // タップ可能なラベル
+                // タップ可能なラベル（軸名 + MAX値を常時表示）
                 ForEach(0..<min(6, labels.count), id: \.self) { i in
                     let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
-                    let lr    = radius + 22
+                    let lr    = radius + 26
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             selectedAxisIndex = selectedAxisIndex == i ? nil : i
                         }
                     } label: {
-                        Text(labels[i])
-                            .font(.system(size: 10, weight: .medium))
-                            .underline(selectedAxisIndex == i)
-                            .foregroundStyle(selectedAxisIndex == i ? Color.blue : Color.primary)
-                            .multilineTextAlignment(.center)
+                        VStack(spacing: 1) {
+                            Text(labels[i])
+                                .font(.system(size: 10, weight: .medium))
+                                .underline(selectedAxisIndex == i)
+                                .foregroundStyle(selectedAxisIndex == i ? Color.blue : Color.primary)
+                            if i < axisDetails.count {
+                                Text(axisDetails[i].maxLabel)
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .multilineTextAlignment(.center)
                     }
                     .buttonStyle(.plain)
                     .position(
@@ -1177,6 +1198,18 @@ private struct RadarChartView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        HStack(spacing: 4) {
+                            Text("満点（100%）")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.orange)
+                            Text(detail.maxFull)
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 6)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(6)
                         Text(detail.description)
                             .font(.caption)
                             .foregroundStyle(.secondary)
