@@ -1090,6 +1090,21 @@ struct AICoachFeedbackSection: View {
 
     private func loadHistory() async {
         history = (try? await SupabaseManager.shared.fetchCachedFeedbacks(localSessionId: session.id)) ?? []
+
+        // 画面再表示時（他セッションを開いて戻ってきた場合等）に、直近の生成結果を
+        // 自動的にメイン表示へ復元する。広告・API呼び出しは発生しない（キャッシュのみ）。
+        if currentResult == nil, let latest = history.first {
+            currentResult = AICoachFeedbackResult(
+                positive: latest.positive,
+                improvement: latest.improvement,
+                summary: latest.summary,
+                personaRecognized: latest.personaRecognized
+            )
+            currentPersona = latest.persona
+            currentPosition = latest.position
+            personaInput = latest.persona
+            positionInput = latest.position ?? ""
+        }
     }
 }
 
