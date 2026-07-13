@@ -47,9 +47,12 @@ final class RewardedAdManager: NSObject, ObservableObject {
         do {
             rewardedAd = try await GADRewardedAd.load(withAdUnitID: adUnitID, request: GADRequest())
             isAdReady = true
+            print("🎬 リワード広告 読み込み成功")
         } catch {
             rewardedAd = nil
             isAdReady = false
+            let nsError = error as NSError
+            print("🎬 リワード広告 読み込み失敗: domain=\(nsError.domain) code=\(nsError.code) \(nsError.localizedDescription) userInfo=\(nsError.userInfo)")
         }
     }
 
