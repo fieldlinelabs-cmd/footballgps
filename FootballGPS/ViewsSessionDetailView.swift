@@ -627,7 +627,8 @@ struct SessionDetailView: View {
                     session: session,
                     thirdRatios: thirdRatios,
                     staminaDropRate: staminaDrop,
-                    radar: radar
+                    radar: radar,
+                    sprintCount: sprintCnt
                 )
             )
 

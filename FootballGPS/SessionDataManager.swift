@@ -442,7 +442,8 @@ class SessionDataManager: ObservableObject {
         session: TrainingSession,
         thirdRatios: (defensive: Double, middle: Double, attacking: Double),
         staminaDropRate: Double?,
-        radar: PlayerRadarData
+        radar: PlayerRadarData,
+        sprintCount: Int
     ) -> String {
         let minutes = max(session.duration / 60.0, 1.0)
 
@@ -454,9 +455,7 @@ class SessionDataManager: ObservableObject {
         ))
         lines.append(String(format: "- 最高速度: %.1f m/s", session.maxSpeed))
         lines.append(String(format: "- 平均速度: %.1f m/s", session.avgSpeed))
-        if let sprintCount = session.sprintCount {
-            lines.append("- スプリント回数: \(sprintCount)回")
-        }
+        lines.append("- スプリント回数: \(sprintCount)回")
         lines.append(String(
             format: "- サード別滞在割合: 守備%.0f%% / 中盤%.0f%% / 攻撃%.0f%%",
             thirdRatios.defensive, thirdRatios.middle, thirdRatios.attacking
