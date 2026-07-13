@@ -333,6 +333,7 @@ struct AICoachFeedbackResult: Decodable {
 struct AICoachFeedbackRow: Decodable, Identifiable {
     let id: UUID
     let persona: String
+    let position: String?
     let positive: String
     let improvement: String
     let summary: String
@@ -342,6 +343,7 @@ struct AICoachFeedbackRow: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id
         case persona
+        case position
         case positive
         case improvement
         case summary
@@ -360,6 +362,7 @@ enum AICoachFeedbackError: String, Decodable, Error {
     case contentBlocked         = "content_blocked"
     case unauthorized
     case invalidPersona         = "invalid_persona"
+    case invalidPosition        = "invalid_position"
     case invalidSessionSummary  = "invalid_session_summary"
     case invalidParams          = "invalid_params"
     case geminiError            = "gemini_error"
@@ -382,7 +385,7 @@ enum AICoachFeedbackError: String, Decodable, Error {
             return "本日の無料生成枠を使い切りました。しばらくしてから広告視聴で分析するか、翌日以降にお試しください。"
         case .contentBlocked:
             return "不適切な内容が含まれていたため生成できませんでした。監督名を確認してください。"
-        case .invalidPersona, .invalidSessionSummary, .invalidParams:
+        case .invalidPersona, .invalidPosition, .invalidSessionSummary, .invalidParams:
             return "入力内容を確認してください。"
         case .unauthorized:
             return "認証エラーが発生しました。アプリを再起動してお試しください。"

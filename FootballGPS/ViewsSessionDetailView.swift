@@ -873,9 +873,11 @@ struct AICoachFeedbackSection: View {
 
     @ObservedObject private var adManager = RewardedAdManager.shared
     @State private var personaInput: String = ""
+    @State private var positionInput: String = ""
     @State private var isGenerating = false
     @State private var currentResult: AICoachFeedbackResult?
     @State private var currentPersona: String = ""
+    @State private var currentPosition: String?
     @State private var history: [AICoachFeedbackRow] = []
     @State private var errorMessage: String?
     @State private var showNoAdNotice = false
@@ -885,7 +887,7 @@ struct AICoachFeedbackSection: View {
             Text("AI監督フィードバック")
                 .font(.headline)
 
-            Text("監督名やチーム名を入力すると、その指導スタイルになりきったAIが今回のプレーを分析します。")
+            Text("監督名やチーム名を入力すると、その指導スタイルになりきったAIが今回のプレーを分析します。ポジションも入力すると、より的確な指摘になります。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -893,8 +895,12 @@ struct AICoachFeedbackSection: View {
                 .textFieldStyle(.roundedBorder)
                 .disabled(isGenerating)
 
+            TextField("あなたのポジション（任意・例: ボランチ）", text: $positionInput)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isGenerating)
+
             Button {
-                Task { await generate(persona: personaInput) }
+                Task { await generate(persona: personaInput, position: positionInput) }
             } label: {
                 Group {
                     if isGenerating {
@@ -921,7 +927,7 @@ struct AICoachFeedbackSection: View {
             }
 
             if let result = currentResult {
-                resultCards(result: result, persona: currentPersona)
+                resultCards(result: result, persona: currentPersona, position: currentPosition)
             }
 
             if !history.isEmpty {
@@ -939,7 +945,7 @@ struct AICoachFeedbackSection: View {
     }
 
     @ViewBuilder
-    private func resultCards(result: AICoachFeedbackResult, persona: String) -> some View {
+    private func resultCards(result: AICoachFeedbackResult, persona: String, position: String?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if !result.personaRecognized {
                 Text("『\(persona)』に関する十分な情報がないため、一般的な指導者の視点からの分析です")
@@ -968,7 +974,7 @@ struct AICoachFeedbackSection: View {
             .cornerRadius(10)
 
             Button("別の切り口で再生成") {
-                Task { await generate(persona: persona) }
+                Task { await generate(persona: persona, position: position ?? "") }
             }
             .font(.caption)
             .disabled(isGenerating)
@@ -991,7 +997,9 @@ struct AICoachFeedbackSection: View {
                             personaRecognized: row.personaRecognized
                         )
                         currentPersona = row.persona
+                        currentPosition = row.position
                         personaInput = row.persona
+                        positionInput = row.position ?? ""
                     } label: {
                         VStack(spacing: 2) {
                             Text(row.persona)
@@ -1013,9 +1021,11 @@ struct AICoachFeedbackSection: View {
 
     // MARK: - Actions
 
-    private func generate(persona: String) async {
+    private func generate(persona: String, position: String) async {
         let trimmed = persona.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let trimmedPosition = position.trimmingCharacters(in: .whitespacesAndNewlines)
+        let position: String? = trimmedPosition.isEmpty ? nil : trimmedPosition
 
         isGenerating = true
         errorMessage = nil
@@ -1040,12 +1050,12 @@ struct AICoachFeedbackSection: View {
 
             switch presentResult {
             case .rewarded:
-                try await fetchWithFreeRetry(ticketId: ticketId, persona: trimmed)
+                try await fetchWithFreeRetry(ticketId: ticketId, persona: trimmed, position: position)
             case .notRewarded:
                 break // 広告を最後まで見なかったので何もしない
             case .noFill:
                 showNoAdNotice = true
-                try await fetchWithFreeRetry(ticketId: nil, persona: trimmed)
+                try await fetchWithFreeRetry(ticketId: nil, persona: trimmed, position: position)
             }
         } catch let error as AICoachFeedbackError {
             errorMessage = error.userMessage
@@ -1056,23 +1066,25 @@ struct AICoachFeedbackSection: View {
 
     /// 広告視聴後にAPI呼び出しが失敗した場合、同じticketで無料の1回だけ即時リトライする（§20.6）。
     /// Edge Function側は成功時のみticketを消費するため、失敗時の再送は追加の広告視聴を必要としない。
-    private func fetchWithFreeRetry(ticketId: String?, persona: String) async throws {
+    private func fetchWithFreeRetry(ticketId: String?, persona: String, position: String?) async throws {
         do {
-            try await fetchAndApply(ticketId: ticketId, persona: persona)
+            try await fetchAndApply(ticketId: ticketId, persona: persona, position: position)
         } catch {
-            try await fetchAndApply(ticketId: ticketId, persona: persona)
+            try await fetchAndApply(ticketId: ticketId, persona: persona, position: position)
         }
     }
 
-    private func fetchAndApply(ticketId: String?, persona: String) async throws {
+    private func fetchAndApply(ticketId: String?, persona: String, position: String?) async throws {
         let result = try await SupabaseManager.shared.fetchAICoachFeedback(
             ticketId: ticketId,
             localSessionId: session.id,
             persona: persona,
+            position: position,
             sessionSummary: sessionSummary
         )
         currentResult = result
         currentPersona = persona
+        currentPosition = position
         await loadHistory()
     }
 

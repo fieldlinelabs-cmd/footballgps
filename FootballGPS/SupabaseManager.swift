@@ -167,12 +167,14 @@ class SupabaseManager {
         ticketId: String?,
         localSessionId: String,
         persona: String,
+        position: String?,
         sessionSummary: String
     ) async throws -> AICoachFeedbackResult {
         struct RequestBody: Encodable {
             let ticketId: String?
             let localSessionId: String
             let persona: String
+            let position: String?
             let sessionSummary: String
         }
         struct ErrorBody: Decodable {
@@ -187,6 +189,7 @@ class SupabaseManager {
                         ticketId: ticketId,
                         localSessionId: localSessionId,
                         persona: persona,
+                        position: position,
                         sessionSummary: sessionSummary
                     )
                 )

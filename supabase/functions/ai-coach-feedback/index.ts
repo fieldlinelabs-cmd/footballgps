@@ -11,6 +11,7 @@ interface RequestBody {
   ticketId: string | null;
   localSessionId: string;
   persona: string;
+  position: string | null;
   sessionSummary: string;
 }
 
@@ -22,6 +23,7 @@ interface GeminiResult {
 }
 
 const MAX_PERSONA_LENGTH = 50;
+const MAX_POSITION_LENGTH = 30;
 const MAX_SESSION_SUMMARY_LENGTH = 4000;
 const TICKET_POLL_INTERVAL_MS = 500;
 const TICKET_POLL_MAX_ATTEMPTS = 10; // 合計最大5秒
@@ -53,6 +55,7 @@ Deno.serve(async (req) => {
   const sessionSummary = body.sessionSummary?.trim();
   const localSessionId = body.localSessionId?.trim();
   const ticketId = body.ticketId ?? null;
+  const position = body.position?.trim() || null;
 
   if (!persona || persona.length > MAX_PERSONA_LENGTH) {
     return json({ error: "invalid_persona" }, 400);
@@ -62,6 +65,9 @@ Deno.serve(async (req) => {
   }
   if (!localSessionId) {
     return json({ error: "invalid_params" }, 400);
+  }
+  if (position && position.length > MAX_POSITION_LENGTH) {
+    return json({ error: "invalid_position" }, 400);
   }
 
   const admin = createAdminClient();
@@ -78,7 +84,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  const geminiResult = await callGemini(persona, sessionSummary);
+  const geminiResult = await callGemini(persona, position, sessionSummary);
   if (!geminiResult.ok) {
     return json({ error: geminiResult.error }, geminiResult.status);
   }
@@ -87,6 +93,7 @@ Deno.serve(async (req) => {
     user_id: user.id,
     local_session_id: localSessionId,
     persona,
+    position,
     ticket_id: ticketId,
     positive: geminiResult.data.positive,
     improvement: geminiResult.data.improvement,
@@ -170,6 +177,7 @@ async function checkFailOpenAllowance(admin: AdminClient, userId: string): Promi
 
 async function callGemini(
   persona: string,
+  position: string | null,
   sessionSummary: string
 ): Promise<{ ok: true; data: GeminiResult } | { ok: false; error: string; status: number }> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
@@ -178,8 +186,9 @@ async function callGemini(
     return { ok: false, error: "internal_error", status: 500 };
   }
 
+  const positionTag = position ? `<position>${escapeForTag(position)}</position>` : "";
   const userContent =
-    `<persona>${escapeForTag(persona)}</persona>\n` +
+    `<persona>${escapeForTag(persona)}</persona>${positionTag}\n` +
     `<session_data>${escapeForTag(sessionSummary)}</session_data>`;
 
   const url =
