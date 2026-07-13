@@ -444,8 +444,14 @@ class SessionDataManager: ObservableObject {
         staminaDropRate: Double?,
         radar: PlayerRadarData
     ) -> String {
+        let minutes = max(session.duration / 60.0, 1.0)
+
         var lines: [String] = []
-        lines.append("- 総移動距離: \(Int(session.totalDistance))m")
+        lines.append(String(format: "- 実施時間: %.0f分", minutes))
+        lines.append(String(
+            format: "- 総移動距離: %dm（1分あたり約%dm。実施時間が短いセッションもあるため、量的指標は必ずこの実施時間を基準に判断すること）",
+            Int(session.totalDistance), Int(session.totalDistance / minutes)
+        ))
         lines.append(String(format: "- 最高速度: %.1f m/s", session.maxSpeed))
         lines.append(String(format: "- 平均速度: %.1f m/s", session.avgSpeed))
         if let sprintCount = session.sprintCount {
