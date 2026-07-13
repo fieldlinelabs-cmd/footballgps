@@ -27,7 +27,9 @@ const TICKET_POLL_INTERVAL_MS = 500;
 const TICKET_POLL_MAX_ATTEMPTS = 10; // 合計最大5秒
 const TICKET_VALID_WINDOW_MS = 5 * 60 * 1000;
 const TICKET_MAX_CONSUMPTIONS = 3;
-const FAIL_OPEN_DAILY_LIMIT = 3;
+// TestFlightでのソロテスト期間中は上限を緩めている（2026-07-13）。
+// アプリがApp Storeにリンクされ広告配信が承認され次第、通常の3程度に戻す想定。
+const FAIL_OPEN_DAILY_LIMIT = 30;
 const GEMINI_MODEL = "gemini-2.5-flash";
 
 Deno.serve(async (req) => {

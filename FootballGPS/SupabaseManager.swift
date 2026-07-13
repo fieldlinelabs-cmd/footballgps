@@ -162,7 +162,7 @@ class SupabaseManager {
     }
 
     /// AI監督フィードバックを生成する（§20.5.3）。`ticketId` が nil の場合は fail-open
-    /// （広告なし、1日3回まで）として扱われる。
+    /// （広告なし、1日30回まで。TestFlightソロテスト期間中の緩和値。§20.6参照）として扱われる。
     func fetchAICoachFeedback(
         ticketId: String?,
         localSessionId: String,

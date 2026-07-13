@@ -15,7 +15,9 @@ import UIKit
 final class RewardedAdManager: NSObject, ObservableObject {
     static let shared = RewardedAdManager()
 
-    // AI監督フィードバック機能（§20）用のリワード広告ユニットID
+    // AI監督フィードバック機能（§20）用のリワード広告ユニットID。
+    // アプリがApp Store未リンクのため現状はno-fillが続くが、その場合は
+    // fail-open（§20.6）が働いて広告なしで分析できるため、本番IDのままにしている。
     private let adUnitID = "ca-app-pub-4525766212952142/9279453167"
 
     /// 事前ロード完了しているか（UIの状態表示用）

@@ -69,6 +69,31 @@ AdMobで実際のApp ID・広告ユニットIDを発行し、コードに反映�
 | `FootballGPS/RewardedAdManager.swift` の `adUnitID` | `ca-app-pub-4525766212952142/9279453167` |
 | SSVコールバックURL | `https://cpbczeugekezejumretu.supabase.co/functions/v1/ad-reward-callback`（AdMob側で確認・適用済み） |
 
+## 7. 実機（TestFlight）での動作確認結果（2026-07-13）
+
+- アプリがApp Storeにリンクされていないため、本番広告ユニットは実配信がほぼ無い状態（no-fill）。
+  この場合は§20.6のfail-openが働き、広告なしで分析が生成される。これは想定通りの挙動
+- Google公式のテスト広告ユニットID（`ca-app-pub-3940256099942544/1712485313`）に一時切り替えて
+  検証したところ、広告の読み込み・表示・視聴完了コールバックは正常に動作することを確認。
+  ただしテストIDはAdMobアカウントに紐付いていないためSSV通知が届かず、`ticket_not_verified`
+  エラーになる（想定通り。テストID使用時はfail-openも発動しないため、分析生成そのものは失敗する）
+- 上記の理由により、**iOS側は本番IDのままにしている**（fail-open任せで分析は生成できるため）
+- アプリがApp Storeにリンクされ広告配信が承認されてから、本番広告ユニットでのSSV検証を
+  改めて確認すること
+
+## 8. fail-open上限の一時緩和（2026-07-13）
+
+TestFlightでのソロテスト期間中、本番広告がno-fillし続けるため、fail-openの1日上限を
+3回→**30回**に緩和した（`supabase/functions/ai-coach-feedback/index.ts` の
+`FAIL_OPEN_DAILY_LIMIT`）。**この変更を反映するには再デプロイが必要:**
+
+```sh
+supabase functions deploy ai-coach-feedback
+```
+
+アプリがApp Storeにリンクされ広告配信が承認され、本番広告での生成が主流になったら
+`FAIL_OPEN_DAILY_LIMIT` を3程度に戻すこと。
+
 ## 検証
 
 - ローカルでの型チェック: `deno check --no-lock supabase/functions/*/index.ts`（要 `brew install deno`）
