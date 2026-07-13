@@ -974,7 +974,7 @@ struct AICoachFeedbackSection: View {
             .background(Color.orange.opacity(0.12))
             .cornerRadius(10)
 
-            Button("別の切り口で再生成") {
+            Button("もう一度やり直す") {
                 Task { await generate(persona: persona, position: position ?? "") }
             }
             .font(.caption)
