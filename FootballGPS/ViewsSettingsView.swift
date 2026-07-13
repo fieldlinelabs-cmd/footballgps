@@ -5,16 +5,43 @@
 //  Created by 木下美樹 on 2025/12/10.
 //
 
+import PhotosUI
 import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
     @ObservedObject private var profileManager = UserProfileManager.shared
+    @State private var selectedPhotoItem: PhotosPickerItem?
 
     var body: some View {
         NavigationStack {
             List {
                 Section("プロフィール") {
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 8) {
+                            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                avatarView
+                            }
+                            if profileManager.profile.avatarImageData != nil {
+                                Button("写真を削除", role: .destructive) {
+                                    profileManager.removeAvatarImage()
+                                }
+                                .font(.caption)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                    .onChange(of: selectedPhotoItem) { _, newItem in
+                        Task {
+                            guard let newItem,
+                                  let data = try? await newItem.loadTransferable(type: Data.self),
+                                  let uiImage = UIImage(data: data) else { return }
+                            profileManager.setAvatarImage(uiImage)
+                        }
+                    }
+
                     HStack {
                         Text("名前")
                         Spacer()
@@ -94,6 +121,31 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("設定")
+        }
+    }
+
+    @ViewBuilder
+    private var avatarView: some View {
+        Group {
+            if let data = profileManager.profile.avatarImageData, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .resizable()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 88, height: 88)
+        .clipShape(Circle())
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: "camera.fill")
+                .font(.caption)
+                .foregroundStyle(.white)
+                .padding(6)
+                .background(Color.accentColor)
+                .clipShape(Circle())
         }
     }
 }

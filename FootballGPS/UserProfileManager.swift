@@ -5,6 +5,7 @@
 
 import Foundation
 import Combine
+import UIKit
 
 class UserProfileManager: ObservableObject {
     static let shared = UserProfileManager()
@@ -42,6 +43,7 @@ class UserProfileManager: ObservableObject {
         guard profile.id != authUid else { return }
         let savedBirthDate = profile.birthDate
         let savedGender = profile.gender
+        let savedAvatarImageData = profile.avatarImageData
         profile = UserProfile(
             id: authUid,
             displayName: profile.displayName,
@@ -51,6 +53,30 @@ class UserProfileManager: ObservableObject {
         )
         profile.birthDate = savedBirthDate
         profile.gender = savedGender
+        profile.avatarImageData = savedAvatarImageData
         save()
+    }
+
+    /// 画像を最大512pxにリサイズ・JPEG圧縮してプロフィールに設定する
+    func setAvatarImage(_ image: UIImage) {
+        profile.avatarImageData = image.resizedForAvatar(maxDimension: 512).jpegData(compressionQuality: 0.7)
+        save()
+    }
+
+    func removeAvatarImage() {
+        profile.avatarImageData = nil
+        save()
+    }
+}
+
+private extension UIImage {
+    func resizedForAvatar(maxDimension: CGFloat) -> UIImage {
+        let scale = min(maxDimension / size.width, maxDimension / size.height, 1.0)
+        guard scale < 1.0 else { return self }
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: newSize))
+        }
     }
 }

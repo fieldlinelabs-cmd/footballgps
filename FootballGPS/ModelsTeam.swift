@@ -102,7 +102,9 @@ struct UserProfile: Identifiable, Codable {
     let createdAt: Date
     var birthDate: Date?
     var gender: Gender?
-    
+    /// プロフィール顔写真（圧縮済みJPEG）。UserDefaultsに保存されるため通常のバックアップ対象
+    var avatarImageData: Data?
+
     init(
         id: String,
         displayName: String,
@@ -110,7 +112,8 @@ struct UserProfile: Identifiable, Codable {
         teamIds: [String] = [],
         createdAt: Date = Date(),
         birthDate: Date? = nil,
-        gender: Gender? = nil
+        gender: Gender? = nil,
+        avatarImageData: Data? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -119,6 +122,7 @@ struct UserProfile: Identifiable, Codable {
         self.createdAt = createdAt
         self.birthDate = birthDate
         self.gender = gender
+        self.avatarImageData = avatarImageData
     }
     
     /// Firestoreとの変換用
