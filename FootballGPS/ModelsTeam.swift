@@ -119,6 +119,10 @@ struct UserProfile: Identifiable, Codable {
     var avatarImageData: Data?
     /// 選手カテゴリ（§22）。未設定の場合、累計系バッジ（A・B）は取得不可扱いになる
     var playerCategory: PlayerCategory?
+    /// 所属チーム名（フリーテキスト。`Team`/`teamIds`とは別で、招待コード等を伴わないプロフィール上の表示用）
+    var teamName: String?
+    /// 所属チームのエンブレム画像（圧縮済みJPEG）。UserDefaultsに保存されるため通常のバックアップ対象
+    var teamEmblemImageData: Data?
 
     init(
         id: String,
@@ -129,7 +133,9 @@ struct UserProfile: Identifiable, Codable {
         birthDate: Date? = nil,
         gender: Gender? = nil,
         avatarImageData: Data? = nil,
-        playerCategory: PlayerCategory? = nil
+        playerCategory: PlayerCategory? = nil,
+        teamName: String? = nil,
+        teamEmblemImageData: Data? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -140,6 +146,8 @@ struct UserProfile: Identifiable, Codable {
         self.gender = gender
         self.avatarImageData = avatarImageData
         self.playerCategory = playerCategory
+        self.teamName = teamName
+        self.teamEmblemImageData = teamEmblemImageData
     }
 
     /// Firestoreとの変換用

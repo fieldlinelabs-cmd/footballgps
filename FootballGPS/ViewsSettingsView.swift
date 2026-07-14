@@ -12,6 +12,7 @@ struct SettingsView: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
     @ObservedObject private var profileManager = UserProfileManager.shared
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var selectedEmblemItem: PhotosPickerItem?
 
     var body: some View {
         NavigationStack {
@@ -79,7 +80,45 @@ struct SettingsView: View {
                 .onChange(of: profileManager.profile.birthDate) { _, _ in profileManager.save() }
                 .onChange(of: profileManager.profile.gender) { _, _ in profileManager.save() }
                 .onChange(of: profileManager.profile.playerCategory) { _, _ in profileManager.save() }
-                
+
+                Section("所属チーム") {
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 8) {
+                            PhotosPicker(selection: $selectedEmblemItem, matching: .images) {
+                                emblemView
+                            }
+                            if profileManager.profile.teamEmblemImageData != nil {
+                                Button("エンブレムを削除", role: .destructive) {
+                                    profileManager.removeTeamEmblemImage()
+                                }
+                                .font(.caption)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                    .onChange(of: selectedEmblemItem) { _, newItem in
+                        Task {
+                            guard let newItem,
+                                  let data = try? await newItem.loadTransferable(type: Data.self),
+                                  let uiImage = UIImage(data: data) else { return }
+                            profileManager.setTeamEmblemImage(uiImage)
+                        }
+                    }
+
+                    HStack {
+                        Text("チーム名")
+                        Spacer()
+                        TextField("未設定", text: Binding(
+                            get: { profileManager.profile.teamName ?? "" },
+                            set: { profileManager.profile.teamName = $0.isEmpty ? nil : $0 }
+                        ))
+                        .multilineTextAlignment(.trailing)
+                    }
+                }
+                .onChange(of: profileManager.profile.teamName) { _, _ in profileManager.save() }
+
                 Section {
                     NavigationLink {
                         Text("フィールド管理（ステップ2で実装）")
@@ -144,6 +183,31 @@ struct SettingsView: View {
                     .scaledToFill()
             } else {
                 Image(systemName: "person.crop.circle.fill")
+                    .resizable()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 88, height: 88)
+        .clipShape(Circle())
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: "camera.fill")
+                .font(.caption)
+                .foregroundStyle(.white)
+                .padding(6)
+                .background(Color.accentColor)
+                .clipShape(Circle())
+        }
+    }
+
+    @ViewBuilder
+    private var emblemView: some View {
+        Group {
+            if let data = profileManager.profile.teamEmblemImageData, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "shield.lefthalf.filled")
                     .resizable()
                     .foregroundStyle(.secondary)
             }

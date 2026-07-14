@@ -45,6 +45,8 @@ class UserProfileManager: ObservableObject {
         let savedGender = profile.gender
         let savedAvatarImageData = profile.avatarImageData
         let savedPlayerCategory = profile.playerCategory
+        let savedTeamName = profile.teamName
+        let savedTeamEmblemImageData = profile.teamEmblemImageData
         profile = UserProfile(
             id: authUid,
             displayName: profile.displayName,
@@ -56,6 +58,8 @@ class UserProfileManager: ObservableObject {
         profile.gender = savedGender
         profile.avatarImageData = savedAvatarImageData
         profile.playerCategory = savedPlayerCategory
+        profile.teamName = savedTeamName
+        profile.teamEmblemImageData = savedTeamEmblemImageData
         save()
     }
 
@@ -67,6 +71,17 @@ class UserProfileManager: ObservableObject {
 
     func removeAvatarImage() {
         profile.avatarImageData = nil
+        save()
+    }
+
+    /// 画像を最大512pxにリサイズ・JPEG圧縮してチームエンブレムに設定する
+    func setTeamEmblemImage(_ image: UIImage) {
+        profile.teamEmblemImageData = image.resizedForAvatar(maxDimension: 512).jpegData(compressionQuality: 0.7)
+        save()
+    }
+
+    func removeTeamEmblemImage() {
+        profile.teamEmblemImageData = nil
         save()
     }
 }
