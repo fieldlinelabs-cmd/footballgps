@@ -17,7 +17,7 @@ enum PlayerDataEngine {
     }
 
     static func totalXP(sessions: [TrainingSession]) -> Int {
-        sessions.reduce(0) { $0 + sessionXP($1) }
+        eligibleSessions(sessions).reduce(0) { $0 + sessionXP($1) }
     }
 
     static func level(forXP xp: Int) -> Int {
@@ -42,16 +42,17 @@ enum PlayerDataEngine {
         let recentSessionCount: Int
     }
 
-    /// 平均計算の対象とするセッション（5分未満・「平均から除外」指定は対象外）。
-    /// 既存の統計表示（ViewsSessionDetailView等）と同じ基準。
-    private static func eligibleForAverage(_ sessions: [TrainingSession]) -> [TrainingSession] {
+    /// 平均・バッジ判定の対象とするセッション（5分未満・「平均から除外」指定は対象外）。
+    /// 既存の統計表示（ViewsSessionDetailView等）と同じ基準。プレイヤーデータ機能の
+    /// 全計算（比較カード・レーダーチャート・バッジ）はこのフィルタを通したセッションのみを使う。
+    private static func eligibleSessions(_ sessions: [TrainingSession]) -> [TrainingSession] {
         sessions.filter { $0.duration >= 300 && !$0.isExcludedFromAverage }
     }
 
     /// 直近セッション vs 直近5回（今回を除く）の平均距離。
     /// 直近5回が揃わない場合は nil（UI側でプレースホルダー表示する）。
     static func compareToRecentAverage(sessions: [TrainingSession]) -> SessionComparison? {
-        let sorted = eligibleForAverage(sessions).sorted { $0.date > $1.date }
+        let sorted = eligibleSessions(sessions).sorted { $0.date > $1.date }
         guard sorted.count >= 6 else { return nil }
         let current = sorted[0]
         let recent5 = Array(sorted[1...5])
@@ -176,7 +177,7 @@ enum PlayerDataEngine {
     }
 
     static func radarComparison(sessions: [TrainingSession]) -> RadarComparison? {
-        let eligible = eligibleForAverage(sessions)
+        let eligible = eligibleSessions(sessions)
         guard !eligible.isEmpty else { return nil }
         let sortedByRecent = eligible.sorted { $0.date > $1.date }
         let recent = Array(sortedByRecent.prefix(5))
@@ -446,12 +447,13 @@ enum PlayerDataEngine {
     // MARK: - まとめ
 
     static func allSections(sessions: [TrainingSession], playerCategory: PlayerCategory?) -> [BadgeSection] {
-        [
-            BadgeSection(id: "milestones", title: "累計マイルストーン", badges: milestoneBadges(sessions: sessions, playerCategory: playerCategory)),
-            BadgeSection(id: "good-sessions", title: "好セッション達成", badges: goodSessionBadges(sessions: sessions, playerCategory: playerCategory)),
-            BadgeSection(id: "streaks", title: "継続", badges: streakBadges(sessions: sessions)),
-            BadgeSection(id: "monthly", title: "月替わりチャレンジ", badges: monthlyChallengeBadges(sessions: sessions)),
-            BadgeSection(id: "memorial-surprise", title: "記念・サプライズ", badges: anniversaryBadges(sessions: sessions) + surpriseBadges(sessions: sessions)),
+        let eligible = eligibleSessions(sessions)
+        return [
+            BadgeSection(id: "milestones", title: "累計マイルストーン", badges: milestoneBadges(sessions: eligible, playerCategory: playerCategory)),
+            BadgeSection(id: "good-sessions", title: "好セッション達成", badges: goodSessionBadges(sessions: eligible, playerCategory: playerCategory)),
+            BadgeSection(id: "streaks", title: "継続", badges: streakBadges(sessions: eligible)),
+            BadgeSection(id: "monthly", title: "月替わりチャレンジ", badges: monthlyChallengeBadges(sessions: eligible)),
+            BadgeSection(id: "memorial-surprise", title: "記念・サプライズ", badges: anniversaryBadges(sessions: eligible) + surpriseBadges(sessions: eligible)),
         ]
     }
 }
