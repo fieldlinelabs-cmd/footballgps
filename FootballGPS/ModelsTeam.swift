@@ -93,6 +93,19 @@ enum Gender: String, Codable, CaseIterable {
     }
 }
 
+/// 選手カテゴリ（§22: プレイヤーデータのバッジ閾値をこの区分で切り替える）
+enum PlayerCategory: String, Codable, CaseIterable {
+    case youth = "youth"       // 育成年代（週3〜4回程度の練習を想定）
+    case general = "general"   // 一般・シニア（週1〜2回程度の練習を想定）
+
+    var displayName: String {
+        switch self {
+        case .youth:   return "育成年代（週3〜4回程度）"
+        case .general: return "一般・シニア（週1〜2回程度）"
+        }
+    }
+}
+
 /// ユーザープロフィール
 struct UserProfile: Identifiable, Codable {
     let id: String // Firebase Auth UID
@@ -104,6 +117,8 @@ struct UserProfile: Identifiable, Codable {
     var gender: Gender?
     /// プロフィール顔写真（圧縮済みJPEG）。UserDefaultsに保存されるため通常のバックアップ対象
     var avatarImageData: Data?
+    /// 選手カテゴリ（§22）。未設定の場合、累計系バッジ（A・B）は取得不可扱いになる
+    var playerCategory: PlayerCategory?
 
     init(
         id: String,
@@ -113,7 +128,8 @@ struct UserProfile: Identifiable, Codable {
         createdAt: Date = Date(),
         birthDate: Date? = nil,
         gender: Gender? = nil,
-        avatarImageData: Data? = nil
+        avatarImageData: Data? = nil,
+        playerCategory: PlayerCategory? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -123,8 +139,9 @@ struct UserProfile: Identifiable, Codable {
         self.birthDate = birthDate
         self.gender = gender
         self.avatarImageData = avatarImageData
+        self.playerCategory = playerCategory
     }
-    
+
     /// Firestoreとの変換用
     var dictionary: [String: Any] {
         var dict: [String: Any] = [

@@ -44,6 +44,7 @@ class UserProfileManager: ObservableObject {
         let savedBirthDate = profile.birthDate
         let savedGender = profile.gender
         let savedAvatarImageData = profile.avatarImageData
+        let savedPlayerCategory = profile.playerCategory
         profile = UserProfile(
             id: authUid,
             displayName: profile.displayName,
@@ -54,6 +55,7 @@ class UserProfileManager: ObservableObject {
         profile.birthDate = savedBirthDate
         profile.gender = savedGender
         profile.avatarImageData = savedAvatarImageData
+        profile.playerCategory = savedPlayerCategory
         save()
     }
 

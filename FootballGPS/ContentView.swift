@@ -21,7 +21,12 @@ struct ContentView: View {
                 .tabItem {
                     Label("フィールド", systemImage: "map")
                 }
-            
+
+            PlayerDataView()
+                .tabItem {
+                    Label("プレイヤーデータ", systemImage: "chart.bar.fill")
+                }
+
             #if DEBUG
             DebugTestView()
                 .tabItem {

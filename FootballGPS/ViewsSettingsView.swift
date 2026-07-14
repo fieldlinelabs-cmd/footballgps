@@ -64,10 +64,21 @@ struct SettingsView: View {
                             Text(g.displayName).tag(Gender?.some(g))
                         }
                     }
+
+                    Picker("選手カテゴリ", selection: $profileManager.profile.playerCategory) {
+                        Text("未設定").tag(PlayerCategory?.none)
+                        ForEach(PlayerCategory.allCases, id: \.self) { c in
+                            Text(c.displayName).tag(PlayerCategory?.some(c))
+                        }
+                    }
+                    Text("「プレイヤーデータ」タブの累計系バッジの難易度に使われます。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .onChange(of: profileManager.profile.displayName) { _, _ in profileManager.save() }
                 .onChange(of: profileManager.profile.birthDate) { _, _ in profileManager.save() }
                 .onChange(of: profileManager.profile.gender) { _, _ in profileManager.save() }
+                .onChange(of: profileManager.profile.playerCategory) { _, _ in profileManager.save() }
                 
                 Section {
                     NavigationLink {

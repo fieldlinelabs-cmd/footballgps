@@ -1292,7 +1292,7 @@ struct PlayerRadarSection: View {
     }
 }
 
-private struct RadarChartView: View {
+struct RadarChartView: View {
     let values: [Double]
     let labels: [String]
     var referenceA: [Double]? = nil
@@ -1493,7 +1493,7 @@ private struct RadarChartView: View {
     }
 }
 
-private struct RadarLegendItem: View {
+struct RadarLegendItem: View {
     let color: Color
     let dashed: Bool
     let label: String
