@@ -564,31 +564,54 @@ extension WorkoutManager: CLLocationManagerDelegate {
             let prevAcceptedLocation = self.locations.last
             self.locations.append(location)
 
-            // GPSポイントとして保存（心拍数を付加）
+            // 位置移動から算出した速度（d÷経過時間）。GPSチップが返すlocation.speedとは独立した推定値
+            var d = 0.0
+            var impliedSpeedFromAccepted: Double? = nil
+            if let prevLocation = prevAcceptedLocation {
+                d = location.distance(from: prevLocation)
+                let elapsed = location.timestamp.timeIntervalSince(prevLocation.timestamp)
+                impliedSpeedFromAccepted = d / max(elapsed, 0.1)
+            }
+
+            // 速度整合性チェック: location.speed（GPS/Doppler由来）が位置移動から見積もった速度を
+            // 大幅に超える場合、GPSの瞬間的なノイズによる誤読とみなし、位置ベースの推定値を採用する。
+            // 年代・能力による絶対的な速度上限は設けない（能力の高い人の本物の記録を誤って弾くリスクを避けるため）。
+            // 係数2.0＋余裕1.0m/sは、加速中は区間平均速度（impliedSpeed）が瞬間速度より低く出ることを考慮した値
+            let rawSpeed = max(0, location.speed)
+            let trustedSpeed: Double
+            if let implied = impliedSpeedFromAccepted, rawSpeed > implied * 2.0 + 1.0 {
+                trustedSpeed = implied
+            } else {
+                trustedSpeed = rawSpeed
+            }
+
+            // GPSポイントとして保存（心拍数を付加、速度は整合性チェック後の値を使う）
             let hr = self.heartRate > 0 ? self.heartRate : nil
-            let gpsPoint = GPSPoint(location: location, heartRate: hr)
+            let gpsPoint = GPSPoint(
+                timestamp: location.timestamp,
+                latitude: location.coordinate.latitude,
+                longitude: location.coordinate.longitude,
+                speed: trustedSpeed,
+                altitude: location.altitude,
+                horizontalAccuracy: location.horizontalAccuracy,
+                heartRate: hr
+            )
             self.gpsPoints.append(gpsPoint)
 
             // 距離を計算 (GPS ドリフトフィルタ: 0.3 m/s 未満は加算しない)
             var distanceIncrement = 0.0
-            if let prevLocation = prevAcceptedLocation {
-                let d = location.distance(from: prevLocation)
-                if location.speed >= 0.3 {
-                    self.distance += d
-                    distanceIncrement = d
-                }
+            if prevAcceptedLocation != nil, trustedSpeed >= 0.3 {
+                self.distance += d
+                distanceIncrement = d
             }
 
             // 速度を更新
-            if location.speed >= 0 {
-                let speed = location.speed
-                self.currentSpeed = speed
-                if speed > self.maxSpeed { self.maxSpeed = speed }
-                // 速度ゾーン・スプリント処理
-                self.processSpeedUpdate(speed: speed, timestamp: location.timestamp, distanceIncrement: distanceIncrement)
-            }
+            self.currentSpeed = trustedSpeed
+            if trustedSpeed > self.maxSpeed { self.maxSpeed = trustedSpeed }
+            // 速度ゾーン・スプリント処理
+            self.processSpeedUpdate(speed: trustedSpeed, timestamp: location.timestamp, distanceIncrement: distanceIncrement)
 
-            print("📍 GPS更新: 速度 \(String(format: "%.1f", location.speed))m/s, 総距離 \(String(format: "%.0f", self.distance))m")
+            print("📍 GPS更新: 速度 \(String(format: "%.1f", trustedSpeed))m/s（生値\(String(format: "%.1f", rawSpeed))m/s）, 総距離 \(String(format: "%.0f", self.distance))m")
         }
     }
     

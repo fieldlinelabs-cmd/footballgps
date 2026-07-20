@@ -8,11 +8,30 @@
 import PhotosUI
 import SwiftUI
 
+private enum PhotoCropTarget: Identifiable {
+    case avatar(UIImage)
+    case emblem(UIImage)
+
+    var id: String {
+        switch self {
+        case .avatar: return "avatar"
+        case .emblem: return "emblem"
+        }
+    }
+
+    var image: UIImage {
+        switch self {
+        case .avatar(let image), .emblem(let image): return image
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
     @ObservedObject private var profileManager = UserProfileManager.shared
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedEmblemItem: PhotosPickerItem?
+    @State private var cropTarget: PhotoCropTarget?
 
     var body: some View {
         NavigationStack {
@@ -39,7 +58,8 @@ struct SettingsView: View {
                             guard let newItem,
                                   let data = try? await newItem.loadTransferable(type: Data.self),
                                   let uiImage = UIImage(data: data) else { return }
-                            profileManager.setAvatarImage(uiImage)
+                            cropTarget = .avatar(uiImage)
+                            selectedPhotoItem = nil
                         }
                     }
 
@@ -103,7 +123,8 @@ struct SettingsView: View {
                             guard let newItem,
                                   let data = try? await newItem.loadTransferable(type: Data.self),
                                   let uiImage = UIImage(data: data) else { return }
-                            profileManager.setTeamEmblemImage(uiImage)
+                            cropTarget = .emblem(uiImage)
+                            selectedEmblemItem = nil
                         }
                     }
 
@@ -170,7 +191,20 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("設定")
+            .navigationTitle("Settings")
+            .fullScreenCover(item: $cropTarget) { target in
+                ImageCropView(image: target.image) {
+                    cropTarget = nil
+                } onComplete: { cropped in
+                    switch target {
+                    case .avatar:
+                        profileManager.setAvatarImage(cropped)
+                    case .emblem:
+                        profileManager.setTeamEmblemImage(cropped)
+                    }
+                    cropTarget = nil
+                }
+            }
         }
     }
 

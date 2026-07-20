@@ -207,25 +207,37 @@ class SessionDataManager: ObservableObject {
         }
 
         return (0..<bucketCount).map { i in
-            TimeSeriesBucket(
+            let bucketStart = Double(i) * intervalSeconds
+            let durationSeconds = min(intervalSeconds, totalDuration - bucketStart)
+            return TimeSeriesBucket(
                 id: i,
                 startMinute: i * Int(intervalSeconds / 60),
                 distance: distances[i],
                 sprintCount: sprintCounts[i],
-                maxSpeed: maxSpeeds[i]
+                maxSpeed: maxSpeeds[i],
+                durationSeconds: durationSeconds
             )
         }
     }
 
-    /// スタミナ低下率を計算（後半/前半の1分あたり走行距離の比率）
+    /// スタミナ低下率を計算（後半/前半の「距離÷実時間」レートの比率）
+    /// 最終バケットは5分未満になりうるため、バケット数の単純平均ではなく実時間で重み付けする
+    /// （そうしないと短い最終バケットが後半平均を不当に押し下げてしまう）
     /// 返値: 0.85未満なら後半スタミナ低下とみなす
     static func computeStaminaDropRate(buckets: [TimeSeriesBucket]) -> Double? {
         guard buckets.count >= 2 else { return nil }
         let mid = buckets.count / 2
-        let firstAvg = buckets[0..<mid].map(\.distance).reduce(0, +) / Double(mid)
-        let secondAvg = buckets[mid...].map(\.distance).reduce(0, +) / Double(buckets.count - mid)
-        guard firstAvg > 0 else { return nil }
-        return secondAvg / firstAvg
+        let firstBuckets = buckets[0..<mid]
+        let secondBuckets = buckets[mid...]
+
+        let firstDuration = firstBuckets.map(\.durationSeconds).reduce(0, +)
+        let secondDuration = secondBuckets.map(\.durationSeconds).reduce(0, +)
+        guard firstDuration > 0, secondDuration > 0 else { return nil }
+
+        let firstRate = firstBuckets.map(\.distance).reduce(0, +) / firstDuration
+        let secondRate = secondBuckets.map(\.distance).reduce(0, +) / secondDuration
+        guard firstRate > 0 else { return nil }
+        return secondRate / firstRate
     }
 
     /// サード別滞在割合を計算（守備/中盤/攻撃、永続化しない）
@@ -268,8 +280,9 @@ class SessionDataManager: ObservableObject {
 
     // MARK: - Style Sync Analysis
 
-    /// 全14スタイルとのシンクロ率を計算して降順で返す
-    /// - スタッツ類似度50% (スプリント/アジリティ/最高速度) + 空間類似度50% (ヒートマップcosine)
+    /// プロスタイルを2段階で診断する
+    /// - ステップ1: ヒートマップの空間類似度のみでポジション（カテゴリ）を判定
+    /// - ステップ2: 判定済みポジション内のスタイルを、スタッツ類似度50% + サード滞在比率50%でタイプ判定
     static func computeStyleSync(
         gpsData: GPSData,
         field: Field,
@@ -277,28 +290,45 @@ class SessionDataManager: ObservableObject {
         sprintCount: Int,
         agilityTurnCount: Int?,
         maxSpeed: Double
-    ) -> [StyleSyncResult] {
-        guard !gpsData.points.isEmpty else { return [] }
+    ) -> StyleSyncDiagnosis? {
+        guard !gpsData.points.isEmpty else { return nil }
 
         let userGrid    = computeHeatmapGrid(gpsData: gpsData, field: field, isFlipped: isFlipped)
         let userSprint  = min(Double(sprintCount) / 30.0, 1.0)
         let userAgility = agilityTurnCount.map { min(Double($0) / 50.0, 1.0) }
         let userSpeed   = min(maxSpeed / 8.0, 1.0)
+        let userThirds  = computeThirdRatios(gpsData: gpsData, field: field, isFlipped: isFlipped)
 
-        return ProStyle.all.map { style in
-            // Stats similarity (50%): 各軸の差 × 2 を 0-1 スコアに変換
-            let sprintScore  = max(0.0, 1.0 - abs(userSprint  - style.sprintTarget)  * 2)
-            let agilityScore = userAgility.map { max(0.0, 1.0 - abs($0 - style.agilityTarget) * 2) } ?? 0.5
-            let speedScore   = max(0.0, 1.0 - abs(userSpeed   - style.maxSpeedTarget) * 2)
-            let statsSim     = (sprintScore + agilityScore + speedScore) / 3.0
+        // ステップ1: ヒートマップ（空間類似度）のみでポジションを判定
+        let spatialByStyle: [(style: ProStyle, spatialSim: Double)] = ProStyle.all.map { style in
+            let idealGrid = generateIdealHeatmap(style: style)
+            return (style, cosineSimilarity(userGrid, idealGrid))
+        }
+        let positionScoreByCategory = Dictionary(grouping: spatialByStyle, by: { $0.style.category })
+            .mapValues { entries in entries.map(\.spatialSim).max() ?? 0 }
+        guard let topCategory = positionScoreByCategory.max(by: { $0.value < $1.value }) else { return nil }
+        let position = PositionSyncResult(category: topCategory.key, positionScore: topCategory.value * 100.0)
 
-            // Spatial similarity (50%): 理想ヒートマップとのコサイン類似度
-            let idealGrid   = generateIdealHeatmap(style: style)
-            let spatialSim  = cosineSimilarity(userGrid, idealGrid)
+        // ステップ2: 判定済みポジション内で、スタッツ類似度50% + サード滞在比率50%でタイプを判定
+        let typeResults = ProStyle.all
+            .filter { $0.category == topCategory.key }
+            .map { style -> StyleSyncResult in
+                let sprintScore  = max(0.0, 1.0 - abs(userSprint  - style.sprintTarget)  * 2)
+                let agilityScore = userAgility.map { max(0.0, 1.0 - abs($0 - style.agilityTarget) * 2) } ?? 0.5
+                let speedScore   = max(0.0, 1.0 - abs(userSpeed   - style.maxSpeedTarget) * 2)
+                let statsSim     = (sprintScore + agilityScore + speedScore) / 3.0
 
-            let syncRate = (statsSim * 0.5 + spatialSim * 0.5) * 100.0
-            return StyleSyncResult(style: style, syncRate: syncRate)
-        }.sorted { $0.syncRate > $1.syncRate }
+                let defScore = max(0.0, 1.0 - abs(userThirds.defensive / 100.0 - style.defensiveThird) * 2)
+                let midScore = max(0.0, 1.0 - abs(userThirds.middle    / 100.0 - style.middleThird)    * 2)
+                let attScore = max(0.0, 1.0 - abs(userThirds.attacking / 100.0 - style.attackingThird) * 2)
+                let thirdSim = (defScore + midScore + attScore) / 3.0
+
+                let typeSim = statsSim * 0.5 + thirdSim * 0.5
+                return StyleSyncResult(style: style, syncRate: typeSim * 100.0)
+            }
+            .sorted { $0.syncRate > $1.syncRate }
+
+        return StyleSyncDiagnosis(position: position, typeResults: typeResults)
     }
 
     /// GPSデータから28×40のヒートマップグリッドを生成（コサイン類似度計算用）
@@ -352,17 +382,12 @@ class SessionDataManager: ObservableObject {
                 let rowW = style.defensiveThird * exp(-pow(rD - defCenter, 2) / (2 * sigmaRow * sigmaRow))
                          + style.middleThird    * exp(-pow(rD - midCenter, 2) / (2 * sigmaRow * sigmaRow))
                          + style.attackingThird * exp(-pow(rD - attCenter, 2) / (2 * sigmaRow * sigmaRow))
-                // 横方向: 中央 or 側面バイアス
-                let colW: Double
-                if style.lateralBias < 0.3 {
-                    colW = exp(-pow(cD - centerCol, 2) / (2 * sigmaCol * sigmaCol))
-                } else {
-                    let t = min(1.0, (style.lateralBias - 0.3) / 0.7)
-                    let ctrW  = exp(-pow(cD - centerCol, 2) / (2 * sigmaCol * sigmaCol))
-                    let leftW = exp(-pow(cD - 5.0,       2) / (2 * sigmaCol * sigmaCol))
-                    let rgtW  = exp(-pow(cD - 34.0,      2) / (2 * sigmaCol * sigmaCol))
-                    colW = (1.0 - t) * ctrW + t * (leftW + rgtW) / 2.0
-                }
+                // 横方向: lateralBiasをそのまま「アウトサイド質量比率」として使用（左右対称）
+                let outsideRatio = style.lateralBias
+                let ctrW  = exp(-pow(cD - centerCol, 2) / (2 * sigmaCol * sigmaCol))
+                let leftW = exp(-pow(cD - 5.0,       2) / (2 * sigmaCol * sigmaCol))
+                let rgtW  = exp(-pow(cD - 34.0,      2) / (2 * sigmaCol * sigmaCol))
+                let colW = (1.0 - outsideRatio) * ctrW + outsideRatio * (leftW + rgtW) / 2.0
                 grid[r][c] = rowW * colW
             }
         }
@@ -387,13 +412,29 @@ class SessionDataManager: ObservableObject {
 
     /// 6軸評価からレーダーチャートデータとプレイヤータイプを計算
     ///
-    /// 参照値（アマチュアサッカー研究値ベース）:
-    ///   走力  : 100 m/分（90分換算 9,000m）
-    ///   スプリント: 0.4 回/分（90分換算 36回）
-    ///   アジリティ: 3.0 回/分（閾値調整後に再検討）
+    /// 参照値:
+    ///   走力  : 130 m/分（実績参考集計P90=127.2 m/分ベース、2026-07-20見直し。旧100は90分換算の
+    ///           アマチュアサッカー研究値だったが、実際のトレーニングセッション（短時間・高強度）は
+    ///           試合平均より単位時間あたりの運動量が高く、旧値ではP50時点で頭打ちしていた）
+    ///   スプリント: 1.0 回/分（実績参考集計P90=0.86 回/分ベース、2026-07-20見直し。旧0.4は
+    ///           P50時点で既に超過し頭打ちしていた。判明当初は参考集計P90=0.33で妥当に見えたが、
+    ///           `session.sprintCount`（記録時点の古い年齢デフォルトの閾値で計算された値）を
+    ///           アップロードしていたバグが別途見つかり、現在の年齢基準の閾値で再計算した正しい値に
+    ///           修正した結果、実際のレートはこれより大幅に高いことが判明した）
+    ///   アジリティ: 4.5 回/分（実績参考集計P90=4.23 回/分ベース、2026-07-20見直し。旧3.0は
+    ///           P75時点で既に超過し頭打ちしていた）
     ///   スタミナ : スタミナ低下率（時間非依存）
-    ///   高強度  : 高強度HR時間率 40%（時間非依存）
+    ///   高強度  : 高強度HR時間率 100%（時間非依存、2026-07-20見直し。旧40%はP50時点で2倍以上
+    ///           超過し常に頭打ちだった。高強度HR時間率は本人の推定最大心拍数に対する割合という
+    ///           「本人内で完結する相対指標」であり、走力・アジリティのような他者と比較可能な絶対量
+    ///           ではない（同じ運動量でも鍛えられた人ほど心拍は上がりにくい）。そのため他軸のように
+    ///           母集団の分布からMaxを較正するのではなく、指標が元々取りうる範囲の上限である100%を
+    ///           Maxとし、「自分がどれだけ追い込んだか」を測る軸として扱う）
     ///   最高速度 : 8.0 m/s ≈ 29 km/h（時間非依存）
+    ///
+    /// 走力・アジリティの見直し根拠は`RadarReferenceStatsView`（開発者用参考画面）およびSupabase RPC
+    /// `get_radar_reference_stats()`の実績集計。2026-07-20時点ではn=6・単一ユーザーのみのサンプルで、
+    /// テスターが増え次第再確認が必要（詳細は§17.2）。
     static func computePlayerRadar(
         totalDistance: Double,
         duration: TimeInterval,
@@ -406,13 +447,13 @@ class SessionDataManager: ObservableObject {
         let minutes = max(duration / 60.0, 1.0)
 
         // 時間正規化メトリクス（分あたり実績 ÷ 分あたり参照値）
-        let distanceScore  = min((totalDistance / minutes) / 100.0, 1.0)
-        let sprintScore    = min((Double(sprintCount) / minutes) / 0.4, 1.0)
-        let agilityScore   = min((Double(agilityTurnCount ?? 0) / minutes) / 3.0, 1.0)
+        let distanceScore  = min((totalDistance / minutes) / 130.0, 1.0)
+        let sprintScore    = min((Double(sprintCount) / minutes) / 1.0, 1.0)
+        let agilityScore   = min((Double(agilityTurnCount ?? 0) / minutes) / 4.5, 1.0)
 
         // 時間非依存メトリクス
         let staminaScore   = min(staminaDrop ?? 0, 1.0)
-        let intensityScore = min((hrIntensityRatio ?? 0) / 40.0, 1.0)
+        let intensityScore = min((hrIntensityRatio ?? 0) / 100.0, 1.0)
         let topSpeedScore  = min(maxSpeed / 8.0, 1.0)  // 8 m/s ≈ 29 km/h = 1.0
 
         let scores: [Double] = [distanceScore, sprintScore, agilityScore, staminaScore, intensityScore, topSpeedScore]

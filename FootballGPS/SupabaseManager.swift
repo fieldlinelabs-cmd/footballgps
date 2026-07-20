@@ -128,6 +128,84 @@ class SupabaseManager {
         }
     }
 
+    // MARK: - RPC: レーダーチャートMax基準値の参考集計（§24 開発者用）
+
+    /// session_summaries に溜まった実績データから、レーダー各軸の分布（p50/p75/p90）を返す。
+    /// この値は開発者がMax定数（SessionDataManager.computePlayerRadar）を見直す際の参考であり、
+    /// アプリが自動でMaxに反映するものではない。
+    func fetchRadarReferenceStats() async throws -> RadarReferenceStats {
+        let rows: [RadarReferenceStatRow] = try await client
+            .rpc("get_radar_reference_stats")
+            .execute()
+            .value
+        guard let row = rows.first else {
+            return RadarReferenceStats(n: 0, distance: .zero, sprint: .zero, agility: .zero, hrIntensity: .zero, maxSpeed: .zero)
+        }
+        return RadarReferenceStats(
+            n: row.n,
+            distance: Percentiles(p50: row.distancePerMinP50, p75: row.distancePerMinP75, p90: row.distancePerMinP90),
+            sprint: Percentiles(p50: row.sprintPerMinP50, p75: row.sprintPerMinP75, p90: row.sprintPerMinP90),
+            agility: Percentiles(p50: row.agilityPerMinP50, p75: row.agilityPerMinP75, p90: row.agilityPerMinP90),
+            hrIntensity: Percentiles(p50: row.hrIntensityRatioP50, p75: row.hrIntensityRatioP75, p90: row.hrIntensityRatioP90),
+            maxSpeed: Percentiles(p50: row.maxSpeedMsP50, p75: row.maxSpeedMsP75, p90: row.maxSpeedMsP90)
+        )
+    }
+
+    struct Percentiles {
+        let p50: Double?
+        let p75: Double?
+        let p90: Double?
+
+        static let zero = Percentiles(p50: nil, p75: nil, p90: nil)
+    }
+
+    struct RadarReferenceStats {
+        let n: Int
+        let distance: Percentiles     // m/分
+        let sprint: Percentiles       // 回/分
+        let agility: Percentiles      // 回/分
+        let hrIntensity: Percentiles  // %
+        let maxSpeed: Percentiles     // m/s
+    }
+
+    private struct RadarReferenceStatRow: Decodable {
+        let n: Int
+        let distancePerMinP50: Double?
+        let distancePerMinP75: Double?
+        let distancePerMinP90: Double?
+        let sprintPerMinP50: Double?
+        let sprintPerMinP75: Double?
+        let sprintPerMinP90: Double?
+        let agilityPerMinP50: Double?
+        let agilityPerMinP75: Double?
+        let agilityPerMinP90: Double?
+        let hrIntensityRatioP50: Double?
+        let hrIntensityRatioP75: Double?
+        let hrIntensityRatioP90: Double?
+        let maxSpeedMsP50: Double?
+        let maxSpeedMsP75: Double?
+        let maxSpeedMsP90: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case n
+            case distancePerMinP50 = "distance_per_min_p50"
+            case distancePerMinP75 = "distance_per_min_p75"
+            case distancePerMinP90 = "distance_per_min_p90"
+            case sprintPerMinP50   = "sprint_per_min_p50"
+            case sprintPerMinP75   = "sprint_per_min_p75"
+            case sprintPerMinP90   = "sprint_per_min_p90"
+            case agilityPerMinP50  = "agility_per_min_p50"
+            case agilityPerMinP75  = "agility_per_min_p75"
+            case agilityPerMinP90  = "agility_per_min_p90"
+            case hrIntensityRatioP50 = "hr_intensity_ratio_p50"
+            case hrIntensityRatioP75 = "hr_intensity_ratio_p75"
+            case hrIntensityRatioP90 = "hr_intensity_ratio_p90"
+            case maxSpeedMsP50     = "max_speed_ms_p50"
+            case maxSpeedMsP75     = "max_speed_ms_p75"
+            case maxSpeedMsP90     = "max_speed_ms_p90"
+        }
+    }
+
     // MARK: - AgeGroupStats（CalibrationStatsView と共有）
 
     struct AgeGroupStats: Identifiable {
@@ -143,11 +221,17 @@ class SupabaseManager {
 
     // MARK: - AI監督フィードバック（§20）
 
-    /// 広告表示前に呼び、生成の「予約チケット」を発行する（§20.5.1）
-    func createAdTicket(localSessionId: String, persona: String) async throws -> String {
+    /// 広告表示前に呼び、生成の「予約チケット」を発行する（§20.5.1, §24）。
+    /// `purpose`で機能を区別する（省略時はAI監督フィードバック向けの"coach_feedback"）。
+    func createAdTicket(
+        localSessionId: String,
+        persona: String? = nil,
+        purpose: String = "coach_feedback"
+    ) async throws -> String {
         struct RequestBody: Encodable {
             let localSessionId: String
-            let persona: String
+            let persona: String?
+            let purpose: String
         }
         struct ResponseBody: Decodable {
             let ticketId: String
@@ -155,7 +239,7 @@ class SupabaseManager {
         let response: ResponseBody = try await client.functions.invoke(
             "create-ad-ticket",
             options: FunctionInvokeOptions(
-                body: RequestBody(localSessionId: localSessionId, persona: persona)
+                body: RequestBody(localSessionId: localSessionId, persona: persona, purpose: purpose)
             )
         )
         return response.ticketId
@@ -215,6 +299,57 @@ class SupabaseManager {
             .order("created_at", ascending: false)
             .execute()
             .value
+    }
+
+    // MARK: - 二つ名生成（§24）
+
+    /// 二つ名を生成する。`ticketId` が nil の場合は fail-open として扱われる（ai-coach-feedbackと同様）。
+    func fetchNickname(
+        ticketId: String?,
+        localSessionId: String,
+        sessionSummary: String
+    ) async throws -> NicknameResult {
+        struct RequestBody: Encodable {
+            let ticketId: String?
+            let localSessionId: String
+            let sessionSummary: String
+        }
+        struct ErrorBody: Decodable {
+            let error: AICoachFeedbackError
+        }
+
+        do {
+            return try await client.functions.invoke(
+                "ai-nickname",
+                options: FunctionInvokeOptions(
+                    body: RequestBody(
+                        ticketId: ticketId,
+                        localSessionId: localSessionId,
+                        sessionSummary: sessionSummary
+                    )
+                )
+            )
+        } catch let error as FunctionsError {
+            if case .httpError(_, let data) = error,
+               let body = try? JSONDecoder().decode(ErrorBody.self, from: data) {
+                throw body.error
+            }
+            throw error
+        }
+    }
+
+    /// セッションを問わず最新の二つ名を1件取得する（プレイヤーデータ画面ヘッダーの称号表示用）。
+    func fetchLatestNickname() async throws -> NicknameRow? {
+        guard let userId = currentUserId else { return nil }
+        let rows: [NicknameRow] = try await client
+            .from("player_nicknames")
+            .select()
+            .eq("user_id", value: userId)
+            .order("created_at", ascending: false)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first
     }
 
     // MARK: - Private Helpers

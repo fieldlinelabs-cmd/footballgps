@@ -12,6 +12,10 @@ struct PlayerDataView: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
     @ObservedObject private var profileManager = UserProfileManager.shared
 
+    @State private var latestNickname: NicknameRow?
+    @State private var showNicknameGenerator = false
+    @State private var showNicknameReason = false
+
     private var sessions: [TrainingSession] { dataManager.sessions }
 
     private var totalXP: Int { PlayerDataEngine.totalXP(sessions: sessions) }
@@ -32,6 +36,7 @@ struct PlayerDataView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard
+                    nicknameButton
                     comparisonCard
                     radarCard
                     ForEach(sections) { section in
@@ -41,33 +46,98 @@ struct PlayerDataView: View {
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("プレイヤーデータ")
+            .navigationTitle("Player Data")
+            .task { await loadLatestNickname() }
+            .sheet(isPresented: $showNicknameGenerator) {
+                NicknameGeneratorView { result in
+                    latestNickname = NicknameRow(
+                        id: UUID(), nickname: result.nickname, reason: result.reason, createdAt: Date()
+                    )
+                }
+            }
         }
     }
 
-    // MARK: - ヘッダー（アバター・レベル）
+    private func loadLatestNickname() async {
+        latestNickname = try? await SupabaseManager.shared.fetchLatestNickname()
+    }
+
+    // MARK: - ヘッダー（所属チーム・アバター・レベル）
+
+    private var hasTeamInfo: Bool {
+        profileManager.profile.teamEmblemImageData != nil
+            || !(profileManager.profile.teamName ?? "").isEmpty
+    }
 
     private var headerCard: some View {
-        HStack(spacing: 16) {
-            avatarView
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("Lv.")
-                        .font(.caption)
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 14) {
+                if hasTeamInfo {
+                    Text(profileManager.profile.teamName?.isEmpty == false ? profileManager.profile.teamName! : "所属チーム未設定")
+                        .font(.subheadline.bold())
                         .foregroundStyle(.secondary)
-                    Text("\(level)")
-                        .font(.title2.bold())
+                        .padding(.trailing, 90)
                 }
-                ProgressView(value: Double(xpIntoLevel), total: 1000)
-                    .tint(.accentColor)
-                Text("次のレベルまで \(xpToNext) XP")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 20) {
+                    avatarView
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let latestNickname {
+                            Button {
+                                showNicknameReason = true
+                            } label: {
+                                Text("「\(latestNickname.nickname)」")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Text(profileManager.profile.displayName.isEmpty ? "名前未設定" : profileManager.profile.displayName)
+                            .font(.headline)
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text("Lv.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(level)")
+                                .font(.largeTitle.bold())
+                        }
+                        ProgressView(value: Double(xpIntoLevel), total: 1000)
+                            .tint(.accentColor)
+                        Text("次のレベルまで \(xpToNext) XP")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if hasTeamInfo {
+                teamEmblemView
             }
         }
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
+        .padding(.horizontal)
+        .alert(
+            latestNickname.map { "「\($0.nickname)」" } ?? "",
+            isPresented: $showNicknameReason
+        ) {
+            Button("閉じる", role: .cancel) {}
+        } message: {
+            Text(latestNickname?.reason ?? "")
+        }
+    }
+
+    private var nicknameButton: some View {
+        Button {
+            showNicknameGenerator = true
+        } label: {
+            Label(latestNickname == nil ? "二つ名をつける" : "二つ名をつけ直す", systemImage: "sparkles")
+                .font(.caption2)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.horizontal)
     }
 
@@ -83,8 +153,26 @@ struct PlayerDataView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 56, height: 56)
+        .frame(width: 128, height: 128)
         .clipShape(Circle())
+    }
+
+    @ViewBuilder
+    private var teamEmblemView: some View {
+        Group {
+            if let data = profileManager.profile.teamEmblemImageData, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "shield.lefthalf.filled")
+                    .resizable()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 78, height: 78)
+        .clipShape(Circle())
+        .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
     }
 
     // MARK: - 比較カード
@@ -137,26 +225,30 @@ struct PlayerDataView: View {
         meters >= 1000 ? String(format: "%.1fkm", meters / 1000) : String(format: "%.0fm", meters)
     }
 
-    // MARK: - レーダーチャート（直近5回平均 vs 自己ベスト）
+    // MARK: - レーダーチャート（直近5回平均・自己ベスト・直前のセッション）
 
     @ViewBuilder
     private var radarCard: some View {
         if let comparison = PlayerDataEngine.radarComparison(sessions: sessions) {
             VStack(spacing: 12) {
-                Text("直近5回平均 vs 自己ベスト")
+                Text("直近5回平均・自己ベスト・直前のセッション")
                     .font(.subheadline.bold())
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 RadarChartView(
                     values: comparison.recentAverage,
                     labels: PlayerDataEngine.radarAxisLabels,
-                    personalAvg: comparison.personalBest
+                    valuesColor: .green,
+                    referenceA: comparison.latestSession,
+                    personalAvg: comparison.personalBest,
+                    personalAvgColor: .orange
                 )
                 .frame(height: 220)
 
                 HStack(spacing: 16) {
-                    RadarLegendItem(color: .blue, dashed: false, label: "直近5回平均")
-                    RadarLegendItem(color: .green, dashed: false, label: "自己ベスト")
+                    RadarLegendItem(color: .green, dashed: false, label: "直近5回平均")
+                    RadarLegendItem(color: .orange, dashed: false, label: "自己ベスト")
+                    RadarLegendItem(color: .gray, dashed: true, label: "直前のセッション")
                 }
                 .font(.caption2)
             }

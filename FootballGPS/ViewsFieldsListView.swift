@@ -22,7 +22,7 @@ struct FieldsListView: View {
                     fieldsList
                 }
             }
-            .navigationTitle("フィールド")
+            .navigationTitle("Fields")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

@@ -209,6 +209,7 @@ struct TimeSeriesBucket: Identifiable {
     let distance: Double   // 区間走行距離 (m)
     let sprintCount: Int   // 区間スプリント回数
     let maxSpeed: Double   // 区間最高速度 (m/s)
+    let durationSeconds: Double  // 区間の実際の長さ（秒）。最終バケットは5分未満になりうる
 }
 
 /// プロスタイル定義（ゾーンパラメータから理想ヒートマップを生成して類似度を計算）
@@ -219,7 +220,7 @@ struct ProStyle: Identifiable {
     let defensiveThird: Double  // 守備サード目標比率 (0-1)
     let middleThird:    Double  // 中盤サード目標比率 (0-1)
     let attackingThird: Double  // 攻撃サード目標比率 (0-1)
-    let lateralBias:    Double  // 0=中央, 1=側面
+    let lateralBias:    Double  // 理想ヒートマップの左右対称アウトサイド質量比率 (0=完全に中央, 1=完全にアウトサイド)
     let sprintTarget:   Double  // スプリント目標 (0-1, 基準30回)
     let agilityTarget:  Double  // アジリティ目標 (0-1, 基準50回)
     let maxSpeedTarget: Double  // 最高速度目標 (0-1, 基準8m/s)
@@ -242,7 +243,7 @@ struct ProStyle: Identifiable {
                  maxSpeedTarget: 0.90, heatmapSpread: 0.40),
         ProStyle(id: "winger_modern", name: "ウインガー（現代型）",     category: "ウイング",
                  defensiveThird: 0.10, middleThird: 0.30, attackingThird: 0.60,
-                 lateralBias: 0.50, sprintTarget: 0.50, agilityTarget: 0.70,
+                 lateralBias: 0.70, sprintTarget: 0.50, agilityTarget: 0.70,
                  maxSpeedTarget: 0.75, heatmapSpread: 0.50),
         // MARK: センターハーフ
         ProStyle(id: "box_to_box",  name: "ボックス・トゥ・ボックス", category: "センターハーフ",
@@ -261,10 +262,6 @@ struct ProStyle: Identifiable {
                  defensiveThird: 0.15, middleThird: 0.45, attackingThird: 0.40,
                  lateralBias: 0.10, sprintTarget: 0.40, agilityTarget: 0.65,
                  maxSpeedTarget: 0.60, heatmapSpread: 0.50),
-        ProStyle(id: "duel_master", name: "デュエルマスター",        category: "センターハーフ",
-                 defensiveThird: 0.25, middleThird: 0.55, attackingThird: 0.20,
-                 lateralBias: 0.20, sprintTarget: 0.35, agilityTarget: 0.75,
-                 maxSpeedTarget: 0.55, heatmapSpread: 0.50),
         // MARK: CB
         ProStyle(id: "libero",      name: "リベロ型",      category: "CB",
                  defensiveThird: 0.65, middleThird: 0.25, attackingThird: 0.10,
@@ -290,11 +287,23 @@ struct ProStyle: Identifiable {
     ]
 }
 
-/// プロスタイル類似度の計算結果
+/// プロスタイル類似度の計算結果（ステップ2: タイプ判定・スタッツ類似度のみ）
 struct StyleSyncResult: Identifiable {
     var id: String { style.id }
     let style: ProStyle
-    let syncRate: Double  // 0-100
+    let syncRate: Double  // 0-100（スタッツ類似度のみ）
+}
+
+/// ステップ1: ポジション（カテゴリ）判定結果 — ヒートマップ空間類似度のみで算出
+struct PositionSyncResult {
+    let category: String        // CF / ウイング / センターハーフ / CB / SB
+    let positionScore: Double   // 0-100（カテゴリ内スタイルの空間類似度の最大値）
+}
+
+/// プロスタイル診断の最終結果（ポジション→タイプの2段階判定）
+struct StyleSyncDiagnosis {
+    let position: PositionSyncResult
+    let typeResults: [StyleSyncResult]  // 判定済みポジション内のスタイルをスタッツ類似度降順でソート
 }
 
 /// プレイヤータイプ称号（最高スコア軸で決定）
@@ -359,6 +368,7 @@ enum AICoachFeedbackError: String, Decodable, Error {
     case ticketExhausted        = "ticket_exhausted"
     case invalidTicket          = "invalid_ticket"
     case dailyLimitReached      = "daily_limit_reached"
+    case serviceBusy            = "service_busy"
     case contentBlocked         = "content_blocked"
     case unauthorized
     case invalidPersona         = "invalid_persona"
@@ -383,8 +393,10 @@ enum AICoachFeedbackError: String, Decodable, Error {
             return "広告視聴の有効期限が切れました。もう一度広告を見てお試しください。"
         case .dailyLimitReached:
             return "本日の無料生成枠を使い切りました。しばらくしてから広告視聴で分析するか、翌日以降にお試しください。"
+        case .serviceBusy:
+            return "現在アクセスが集中しています。しばらく時間をおいてから再度お試しください。"
         case .contentBlocked:
-            return "不適切な内容が含まれていたため生成できませんでした。監督名を確認してください。"
+            return "不適切な内容が含まれていたため生成できませんでした。入力内容を確認してください。"
         case .invalidPersona, .invalidPosition, .invalidSessionSummary, .invalidParams:
             return "入力内容を確認してください。"
         case .unauthorized:
@@ -392,6 +404,29 @@ enum AICoachFeedbackError: String, Decodable, Error {
         case .geminiError, .unknown:
             return "分析中にエラーが発生しました。もう一度お試しください。"
         }
+    }
+}
+
+// MARK: - 二つ名生成（§24）
+
+/// `ai-nickname` Edge Functionの生成結果
+struct NicknameResult: Decodable {
+    let nickname: String
+    let reason: String
+}
+
+/// `player_nicknames` テーブルの1行（ヘッダー称号表示用）
+struct NicknameRow: Decodable, Identifiable {
+    let id: UUID
+    let nickname: String
+    let reason: String
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case nickname
+        case reason
+        case createdAt = "created_at"
     }
 }
 

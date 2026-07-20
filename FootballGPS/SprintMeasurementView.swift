@@ -39,9 +39,6 @@ struct SprintMeasurementView: View {
                                 Text(String(format: "%.1f km/h", r.maxSpeedKmh))
                                     .font(.title3)
                                     .fontWeight(.bold)
-                                Text(String(format: "%.2f m/s", r.maxSpeed))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
                             }
                         }
                         .swipeActions(edge: .trailing) {

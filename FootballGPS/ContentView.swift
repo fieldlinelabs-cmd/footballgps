@@ -7,37 +7,67 @@
 
 import SwiftUI
 
+private enum AppTab: Hashable {
+    case playerData, sessions, fields, test, settings
+}
+
 struct ContentView: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
+    @State private var showSplash = true
+    @State private var selectedTab: AppTab = .playerData
 
     var body: some View {
-        TabView {
-            SessionsListView()
-                .tabItem {
-                    Label("セッション", systemImage: "list.bullet")
-                }
-            
-            FieldsListView()
-                .tabItem {
-                    Label("フィールド", systemImage: "map")
-                }
+        ZStack {
+            mainTabView
 
+            if showSplash {
+                SplashView()
+                    .transition(.opacity)
+                    .zIndex(1)
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            withAnimation(.easeInOut(duration: 0.35)) {
+                                showSplash = false
+                            }
+                        }
+                    }
+            }
+        }
+    }
+
+    private var mainTabView: some View {
+        TabView(selection: $selectedTab) {
             PlayerDataView()
                 .tabItem {
-                    Label("プレイヤーデータ", systemImage: "chart.bar.fill")
+                    Label("Player Data", systemImage: "chart.bar.fill")
                 }
+                .tag(AppTab.playerData)
+
+            SessionsListView()
+                .tabItem {
+                    Label("Sessions", systemImage: "list.bullet")
+                }
+                .tag(AppTab.sessions)
+
+            FieldsListView()
+                .tabItem {
+                    Label("Fields", systemImage: "map")
+                }
+                .tag(AppTab.fields)
 
             #if DEBUG
             DebugTestView()
                 .tabItem {
-                    Label("テスト", systemImage: "hammer.fill")
+                    Label("Test", systemImage: "hammer.fill")
                 }
+                .tag(AppTab.test)
             #endif
-            
+
             SettingsView()
                 .tabItem {
-                    Label("設定", systemImage: "gear")
+                    Label("Settings", systemImage: "gear")
                 }
+                .tag(AppTab.settings)
         }
         .overlay {
             if dataManager.isMigrating {
@@ -118,6 +148,11 @@ struct DebugTestView: View {
                     } label: {
                         Label("閾値キャリブレーション集計", systemImage: "chart.bar.fill")
                     }
+                    NavigationLink {
+                        RadarReferenceStatsView()
+                    } label: {
+                        Label("レーダーMax参考集計", systemImage: "chart.bar.fill")
+                    }
                 } header: {
                     Text("デバッグツール")
                 }
@@ -135,7 +170,7 @@ struct DebugTestView: View {
                     Text("データ管理")
                 }
             }
-            .navigationTitle("デバッグ")
+            .navigationTitle("Debug")
             .alert("完了", isPresented: $showAlert) {
                 Button("OK") {}
             } message: {
@@ -317,7 +352,7 @@ struct DebugGPSLogView: View {
                                                 .font(.caption2)
                                             Text("  経度: \(String(format: "%.6f", first.longitude))")
                                                 .font(.caption2)
-                                            Text("  速度: \(String(format: "%.1f", first.speed)) m/s")
+                                            Text("  速度: \(String(format: "%.1f", first.speed * 3.6)) km/h")
                                                 .font(.caption2)
                                         }
                                     }
@@ -331,7 +366,7 @@ struct DebugGPSLogView: View {
                                                 .font(.caption2)
                                             Text("  経度: \(String(format: "%.6f", last.longitude))")
                                                 .font(.caption2)
-                                            Text("  速度: \(String(format: "%.1f", last.speed)) m/s")
+                                            Text("  速度: \(String(format: "%.1f", last.speed * 3.6)) km/h")
                                                 .font(.caption2)
                                         }
                                     }
@@ -491,7 +526,7 @@ struct GPSMapDebugView: View {
                             
                             Spacer()
                             
-                            Text("\(String(format: "%.1f", point.speed)) m/s")
+                            Text("\(String(format: "%.1f", point.speed * 3.6)) km/h")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }

@@ -47,7 +47,7 @@ struct SessionDetailView: View {
     @State private var hrIntensity: (highIntensityRatio: Double, highIntensitySprintCount: Int)? = nil
 
     // プロスタイル診断
-    @State private var syncResults: [StyleSyncResult] = []
+    @State private var syncDiagnosis: StyleSyncDiagnosis?
 
     // フィールド変更シート
     @State private var showingFieldPicker = false
@@ -277,10 +277,10 @@ struct SessionDetailView: View {
                 }
                 
                 VStack {
-                    Text(String(format: "%.1f", session.maxSpeed))
+                    Text(String(format: "%.1f", session.maxSpeed * 3.6))
                         .font(.title)
                         .fontWeight(.bold)
-                    Text("最高速度 (m/s)")
+                    Text("最高速度 (km/h)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -352,13 +352,21 @@ struct SessionDetailView: View {
                     hrIntensityRatio: hrRatio,
                     maxSpeed: session.maxSpeed
                 )
+                // session は値型のため updateComputedMetrics の変更を反映していない。
+                // staminaDrop/hrIntensityRatio/sprintCount は今計算した値を明示的に上書きしてからアップロードする。
+                // sprintCount は session.sprintCount（記録時点の古い閾値での値）ではなく、
+                // 現在のプロフィール（年齢・性別）の閾値で再計算した sprintCnt を使う（radar計算と同じ値に揃える）
+                var updatedSession = session
+                updatedSession.staminaDrop = drop
+                updatedSession.hrIntensityRatio = hrRatio
+                updatedSession.sprintCount = sprintCnt
                 Task {
-                    try? await SupabaseManager.shared.uploadSessionSummary(session, radar: radar)
+                    try? await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
                 }
             }
             if let field = currentField {
                 let cnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
-                syncResults = SessionDataManager.computeStyleSync(
+                syncDiagnosis = SessionDataManager.computeStyleSync(
                     gpsData: gpsData,
                     field: field,
                     isFlipped: isFlipped,
@@ -374,7 +382,7 @@ struct SessionDetailView: View {
         .onChange(of: isFlipped) { _, flipped in
             if let field = currentField {
                 let cnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
-                syncResults = SessionDataManager.computeStyleSync(
+                syncDiagnosis = SessionDataManager.computeStyleSync(
                     gpsData: gpsData,
                     field: field,
                     isFlipped: flipped,
@@ -586,8 +594,8 @@ struct SessionDetailView: View {
             VStack(spacing: 12) {
                 StatisticRow(label: "総距離", value: formatDistance(session.totalDistance), icon: "figure.walk")
                 StatisticRow(label: "時間", value: formatDuration(session.duration), icon: "clock.fill")
-                StatisticRow(label: "平均速度", value: String(format: "%.2f m/s", session.avgSpeed), icon: "speedometer")
-                StatisticRow(label: "最高速度", value: String(format: "%.2f m/s", session.maxSpeed), icon: "flame.fill")
+                StatisticRow(label: "平均速度", value: String(format: "%.1f km/h", session.avgSpeed * 3.6), icon: "speedometer")
+                StatisticRow(label: "最高速度", value: String(format: "%.1f km/h", session.maxSpeed * 3.6), icon: "flame.fill")
 
                 StatisticRow(
                     label: "スプリント回数",
@@ -633,11 +641,11 @@ struct SessionDetailView: View {
             )
 
             // プロスタイル診断
-            if !syncResults.isEmpty {
+            if let diagnosis = syncDiagnosis {
                 Text("プロスタイル診断")
                     .font(.headline)
                     .padding(.horizontal)
-                StyleSyncSection(results: Array(syncResults.prefix(3)))
+                StyleSyncSection(diagnosis: diagnosis)
             }
 
             // サード別滞在
@@ -844,7 +852,7 @@ private struct TimelineBucketCard: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text("\(bucket.startMinute)-\(bucket.startMinute + 5)分")
+            Text("\(bucket.startMinute)-\(bucket.startMinute + Int(bucket.durationSeconds / 60.0))分")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(String(format: "%.0fm", bucket.distance))
@@ -854,7 +862,7 @@ private struct TimelineBucketCard: View {
                 Image(systemName: "bolt.fill").foregroundStyle(.red).font(.caption2)
                 Text("\(bucket.sprintCount)").font(.caption2)
             }
-            Text(String(format: "%.1fm/s", bucket.maxSpeed))
+            Text(String(format: "%.1fkm/h", bucket.maxSpeed * 3.6))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -1112,15 +1120,37 @@ struct AICoachFeedbackSection: View {
 // MARK: - Style Sync Section
 
 struct StyleSyncSection: View {
-    let results: [StyleSyncResult]
+    let diagnosis: StyleSyncDiagnosis
 
     var body: some View {
         VStack(spacing: 12) {
-            if let top = results.first {
-                // トップマッチ ヒーロー表示
+            // ステップ1: ポジション判定（ヒートマップ空間類似度のみ）
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ポジション")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(diagnosis.position.category)
+                        .font(.title3.bold())
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(String(format: "%.0f%%", diagnosis.position.positionScore))
+                        .font(.title2.bold())
+                        .foregroundStyle(syncColor(rate: diagnosis.position.positionScore))
+                    Text("ヒートマップ一致度")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            if let top = diagnosis.typeResults.first {
+                // ステップ2: タイプ判定（スタッツ類似度50% + サード滞在比率50%）
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(top.style.category)
+                        Text("タイプ")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Text(top.style.name)
@@ -1129,27 +1159,20 @@ struct StyleSyncSection: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(String(format: "%.0f%%", top.syncRate))
-                            .font(.title.bold())
+                            .font(.title2.bold())
                             .foregroundStyle(syncColor(rate: top.syncRate))
-                        Text("シンクロ率")
+                        Text("スタッツ・サード一致度")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                Divider()
-
-                // トップ3 ランキングバー
-                ForEach(results) { result in
+                // タイプ候補ランキングバー
+                ForEach(diagnosis.typeResults) { result in
                     HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(result.style.name)
-                                .font(.caption)
-                            Text(result.style.category)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(result.style.name)
+                            .font(.caption)
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
@@ -1196,13 +1219,18 @@ struct PlayerRadarSection: View {
         [radar.distance, radar.sprint, radar.agility, radar.stamina, radar.intensity, radar.topSpeed]
     }
 
-    // 案A: 研究ベースのアマチュア平均参照値（各軸の参照最大値に対する割合）
-    // 走力100m/分・スプリント0.4/分・アジリティ3.0/分・スタミナ・HR高強度40%・最高速度8m/sを基準
-    private let referenceA: [Double] = [0.80, 0.75, 0.67, 0.30, 0.75, 0.75]
+    // 案A: 研究ベースのアマチュア平均参照値（各軸のMax定数に対する割合、2026-07-20見直し）
+    // 走力130m/分・スプリント1.0/分・アジリティ4.5/分・スタミナ・HR高強度100%（自己指標）・最高速度8m/sを基準
+    // アマ平均の絶対値（走力80m/分・スプリント0.3回/分・アジリティ2.0回/分・高強度30%・最高速度21.6km/h）自体は
+    // 研究値のまま変更していない。Max定数の変更に合わせて比率のみ再計算した
+    private let referenceA: [Double] = [80.0 / 130.0, 0.3 / 1.0, 2.0 / 4.5, 0.30, 30.0 / 100.0, 0.75]
 
-    // 案C: 過去セッションの自己平均（5分未満・手動除外は対象外）
+    // 案C: 直近5回の自己平均（5分未満・手動除外は対象外）
     private var personalAvg: [Double]? {
-        let eligible = sessions.filter { $0.duration >= 300 && !$0.isExcludedFromAverage }
+        let eligible = sessions
+            .filter { $0.duration >= 300 && !$0.isExcludedFromAverage }
+            .sorted { $0.date > $1.date }
+            .prefix(5)
         guard eligible.count >= 2 else { return nil }
         let radars = eligible.map { s in
             SessionDataManager.computePlayerRadar(
@@ -1257,7 +1285,7 @@ struct PlayerRadarSection: View {
             HStack(spacing: 16) {
                 RadarLegendItem(color: .blue, dashed: false, label: "今回")
                 if personalAvg != nil {
-                    RadarLegendItem(color: .green, dashed: false, label: "自己平均")
+                    RadarLegendItem(color: .green, dashed: false, label: "直近5回平均")
                 }
                 RadarLegendItem(color: .gray, dashed: true, label: "アマ平均(参考)")
             }
@@ -1295,8 +1323,11 @@ struct PlayerRadarSection: View {
 struct RadarChartView: View {
     let values: [Double]
     let labels: [String]
+    var valuesColor: Color = .blue
     var referenceA: [Double]? = nil
+    var referenceAColor: Color = .gray
     var personalAvg: [Double]? = nil
+    var personalAvgColor: Color = .green
 
     @State private var selectedAxisIndex: Int? = nil
 
@@ -1309,21 +1340,21 @@ struct RadarChartView: View {
 
     private let axisDetails: [AxisDetail] = [
         AxisDetail(
-            maxLabel: "100m/分",
-            maxFull: "100m/分（分速100m＝時速6km）",
+            maxLabel: "130m/分",
+            maxFull: "130m/分（分速130m＝時速7.8km）",
             description: "プレー中の総移動距離を時間で割った値。フィールドをどれだけ広くカバーできるかを示します。",
             reference: "アマ平均 80m/分"
         ),
         AxisDetail(
-            maxLabel: "0.4回/分",
-            maxFull: "0.4回/分（60分で24回のスプリント）",
+            maxLabel: "1.0回/分",
+            maxFull: "1.0回/分（60分で60回のスプリント）",
             description: "時速20km/h以上のGPSポイントが2点以上続いた回数を時間で割った値。爆発的なダッシュ力を示します。",
             reference: "アマ平均 0.3回/分"
         ),
         AxisDetail(
-            maxLabel: "3.0回/分",
-            maxFull: "3.0回/分（60分で180回の方向転換）",
-            description: "GPS軌跡で60度以上の方向転換を1.5m/s以上の速度で行った回数を時間で割った値。切り返しの敏捷性を示します。",
+            maxLabel: "4.5回/分",
+            maxFull: "4.5回/分（60分で270回の方向転換）",
+            description: "GPS軌跡で60度以上の方向転換を5.4km/h以上の速度で行った回数を時間で割った値。切り返しの敏捷性を示します。",
             reference: "アマ平均 2.0回/分"
         ),
         AxisDetail(
@@ -1333,16 +1364,16 @@ struct RadarChartView: View {
             reference: ""
         ),
         AxisDetail(
-            maxLabel: "40%",
-            maxFull: "総プレー時間の40%が最大心拍数の80%以上",
-            description: "最大心拍数の80%以上で動いた時間の割合。心肺への負荷強度を示します。心拍データが必要です。",
+            maxLabel: "100%",
+            maxFull: "最大心拍数の80%以上で動いた時間の割合（自分の頑張り度、100%が上限）",
+            description: "最大心拍数の80%以上で動いた時間の割合。他人との比較ではなく、自分がどれだけ追い込めたかを示す指標です。心拍データが必要です。",
             reference: "アマ平均 30%"
         ),
         AxisDetail(
-            maxLabel: "8.0m/s",
-            maxFull: "8.0m/s（約29km/h）",
+            maxLabel: "28.8km/h",
+            maxFull: "28.8km/h",
             description: "セッション中にGPSで記録した最高速度。スプリント能力の上限を示します。",
-            reference: "アマ平均 6.0m/s"
+            reference: "アマ平均 21.6km/h"
         ),
     ]
 
@@ -1386,17 +1417,17 @@ struct RadarChartView: View {
                     }
                     if let refA = referenceA {
                         let path = hexagonPath(vals: refA, cx: cx, cy: cy, r: radius)
-                        ctx.stroke(path, with: .color(.gray.opacity(0.65)),
+                        ctx.stroke(path, with: .color(referenceAColor.opacity(0.65)),
                                    style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
                     }
                     if let hist = personalAvg {
                         let path = hexagonPath(vals: hist, cx: cx, cy: cy, r: radius)
-                        ctx.fill(path, with: .color(.green.opacity(0.12)))
-                        ctx.stroke(path, with: .color(.green.opacity(0.65)), lineWidth: 1.5)
+                        ctx.fill(path, with: .color(personalAvgColor.opacity(0.12)))
+                        ctx.stroke(path, with: .color(personalAvgColor.opacity(0.65)), lineWidth: 1.5)
                     }
                     let dataPath = hexagonPath(vals: values, cx: cx, cy: cy, r: radius)
-                    ctx.fill(dataPath, with: .color(.blue.opacity(0.25)))
-                    ctx.stroke(dataPath, with: .color(.blue.opacity(0.75)), lineWidth: 2)
+                    ctx.fill(dataPath, with: .color(valuesColor.opacity(0.25)))
+                    ctx.stroke(dataPath, with: .color(valuesColor.opacity(0.75)), lineWidth: 2)
                 }
 
                 // タップ可能なラベル（軸名 + MAX値を常時表示）

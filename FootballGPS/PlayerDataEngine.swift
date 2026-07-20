@@ -174,6 +174,7 @@ enum PlayerDataEngine {
     struct RadarComparison {
         let recentAverage: [Double] // 直近5回（無ければあるだけ）の各軸平均
         let personalBest: [Double]  // 全セッション中の各軸最高値（軸ごとに別セッションで良い）
+        let latestSession: [Double] // 直前（最新）1回のセッション
     }
 
     static func radarComparison(sessions: [TrainingSession]) -> RadarComparison? {
@@ -184,6 +185,7 @@ enum PlayerDataEngine {
 
         let allValues = eligible.map { radarValues(for: $0) }
         let recentValues = recent.map { radarValues(for: $0) }
+        let latestValues = radarValues(for: sortedByRecent[0])
 
         func average(_ arrays: [[Double]]) -> [Double] {
             var sums = [Double](repeating: 0, count: 6)
@@ -202,7 +204,8 @@ enum PlayerDataEngine {
 
         return RadarComparison(
             recentAverage: average(recentValues),
-            personalBest: maxPerAxis(allValues)
+            personalBest: maxPerAxis(allValues),
+            latestSession: latestValues
         )
     }
 

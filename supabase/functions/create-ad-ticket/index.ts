@@ -1,11 +1,14 @@
-// docs/技術実装仕様書.md §20.5.1
+// docs/技術実装仕様書.md §20.5.1, §24
 // 広告表示前に呼び、生成の「予約チケット」を発行する。
+// purpose により複数機能（AI監督フィードバック・二つ名生成 等）でこのチケットシステムを
+// 共用する。persona は purpose='coach_feedback' の場合のみ必須。
 
 import { createAdminClient, resolveUser } from "../_shared/supabaseClients.ts";
 
 interface RequestBody {
   localSessionId: string;
-  persona: string;
+  persona?: string;
+  purpose?: string;
 }
 
 Deno.serve(async (req) => {
@@ -26,8 +29,13 @@ Deno.serve(async (req) => {
   }
 
   const localSessionId = body.localSessionId?.trim();
-  const persona = body.persona?.trim();
-  if (!localSessionId || !persona || persona.length > 50) {
+  const purpose = body.purpose?.trim() || "coach_feedback";
+  const persona = body.persona?.trim() || null;
+
+  if (!localSessionId) {
+    return new Response(JSON.stringify({ error: "invalid_params" }), { status: 400 });
+  }
+  if (purpose === "coach_feedback" && (!persona || persona.length > 50)) {
     return new Response(JSON.stringify({ error: "invalid_params" }), { status: 400 });
   }
 
@@ -38,6 +46,7 @@ Deno.serve(async (req) => {
       user_id: user.id,
       local_session_id: localSessionId,
       persona,
+      purpose,
     })
     .select("id")
     .single();

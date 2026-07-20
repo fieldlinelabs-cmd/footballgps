@@ -21,7 +21,7 @@ struct SessionsListView: View {
                     sessionsList
                 }
             }
-            .navigationTitle("マイセッション")
+            .navigationTitle("My Sessions")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -199,7 +199,7 @@ struct SessionRow: View {
 
                 StatBadge(
                     icon: "speedometer",
-                    value: String(format: "%.1f m/s", session.maxSpeed),
+                    value: String(format: "%.1f km/h", session.maxSpeed * 3.6),
                     color: .orange
                 )
 
