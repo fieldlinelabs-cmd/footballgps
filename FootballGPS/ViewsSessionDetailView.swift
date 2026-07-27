@@ -62,6 +62,10 @@ struct SessionDetailView: View {
     @State private var isDraggingSlider = false
     @Environment(\.scenePhase) private var scenePhase
     private let timer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
+
+    // トリム（打ち切り）
+    @State private var showTrimConfirm = false
+    @State private var showUndoConfirm = false
     
     init(session: TrainingSession, gpsData: GPSData) {
         self.session = session
@@ -97,7 +101,27 @@ struct SessionDetailView: View {
         }
         return lo
     }
-    
+
+    /// dataManager.sessions 内の最新値（トリム確定直後の再計算値等）を反映するセッション参照。
+    /// session（let）は識別子・トリムで変化しないフィールド用に残す。
+    private var displaySession: TrainingSession {
+        dataManager.sessions.first(where: { $0.id == session.id }) ?? session
+    }
+
+    /// トリム設定を適用した点列（生データは変更しない）
+    private var effectivePoints: [GPSPoint] {
+        SessionDataManager.trimmedPoints(gpsData.points, toOffset: displaySession.effectiveEndOffset)
+    }
+
+    private var effectiveGPSData: GPSData {
+        GPSData(sessionId: gpsData.sessionId, points: effectivePoints)
+    }
+
+    /// 確定済みトリムの位置に対応する gpsData.points 内インデックス（未トリムなら nil）
+    private var effectiveCutoffIndex: Int? {
+        displaySession.effectiveEndOffset.map { SessionDataManager.gpsIndex(in: gpsData.points, atElapsed: $0) }
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
@@ -259,25 +283,25 @@ struct SessionDetailView: View {
             
             HStack(spacing: 30) {
                 VStack {
-                    Text(formatDuration(session.duration))
+                    Text(formatDuration(displaySession.duration))
                         .font(.title)
                         .fontWeight(.bold)
                     Text("時間")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                
+
                 VStack {
-                    Text(formatDistance(session.totalDistance))
+                    Text(formatDistance(displaySession.totalDistance))
                         .font(.title)
                         .fontWeight(.bold)
                     Text("距離")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                
+
                 VStack {
-                    Text(String(format: "%.1f", session.maxSpeed * 3.6))
+                    Text(String(format: "%.1f", displaySession.maxSpeed * 3.6))
                         .font(.title)
                         .fontWeight(.bold)
                     Text("最高速度 (km/h)")
@@ -302,77 +326,172 @@ struct SessionDetailView: View {
                 field: field,
                 isFlipped: isFlipped,
                 currentPointIndex: currentPointIndex,
-                sprintSegments: showSprints ? sprintSegments : []
+                sprintSegments: showSprints ? sprintSegments : [],
+                effectiveCutoffIndex: effectiveCutoffIndex
             )
             .frame(height: 600)
 
-            // スプリント表示切り替え
-            Button {
-                showSprints.toggle()
-            } label: {
-                Label(
-                    showSprints ? "スプリント表示 ON" : "スプリント表示 OFF",
-                    systemImage: showSprints ? "figure.run" : "figure.walk"
-                )
-                .font(.subheadline)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(showSprints ? Color.red.opacity(0.12) : Color(.systemGray6))
-                .foregroundStyle(showSprints ? .red : .secondary)
-                .clipShape(Capsule())
+            HStack(spacing: 8) {
+                // スプリント表示切り替え
+                Button {
+                    showSprints.toggle()
+                } label: {
+                    Label(
+                        showSprints ? "スプリント表示 ON" : "スプリント表示 OFF",
+                        systemImage: showSprints ? "figure.run" : "figure.walk"
+                    )
+                    .font(.subheadline)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(showSprints ? Color.red.opacity(0.12) : Color(.systemGray6))
+                    .foregroundStyle(showSprints ? .red : .secondary)
+                    .clipShape(Capsule())
+                }
+
+                // この位置で打ち切る
+                Button {
+                    showTrimConfirm = true
+                } label: {
+                    Label(
+                        displaySession.isTrimmed ? "この位置に変更" : "この位置で打ち切る",
+                        systemImage: "scissors"
+                    )
+                    .font(.subheadline)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.orange.opacity(0.12))
+                    .foregroundStyle(.orange)
+                    .clipShape(Capsule())
+                }
+                .disabled(currentPointIndex < 1)
             }
             .padding(.horizontal)
 
             playbackControlsView
 
+            if let offset = displaySession.effectiveEndOffset {
+                HStack {
+                    Text("✂️ 実質\(formatPlaybackTime(offset))で打ち切り中（生データ\(formatPlaybackTime(totalDuration))）")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                    Spacer()
+                    Button("元に戻す") {
+                        showUndoConfirm = true
+                    }
+                    .font(.caption2)
+                }
+                .padding(.horizontal)
+            }
+
             fieldControlsRow
+        }
+        .confirmationDialog(
+            "この位置でセッションを打ち切りますか？",
+            isPresented: $showTrimConfirm,
+            titleVisibility: .visible
+        ) {
+            if computeTrimResult(points: SessionDataManager.trimmedPoints(gpsData.points, toOffset: currentTime)) != nil {
+                Button("打ち切る") {
+                    Task { await applyTrim(offset: currentTime) }
+                }
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            if let preview = computeTrimResult(points: SessionDataManager.trimmedPoints(gpsData.points, toOffset: currentTime)) {
+                Text("時間: \(formatDuration(displaySession.duration)) → \(formatDuration(preview.duration))\n距離: \(formatDistance(displaySession.totalDistance)) → \(formatDistance(preview.totalDistance))")
+            } else {
+                Text("この位置では短すぎて打ち切れません")
+            }
+        }
+        .confirmationDialog(
+            "トリムを元に戻しますか？",
+            isPresented: $showUndoConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("元に戻す", role: .destructive) {
+                Task { await applyTrim(offset: nil) }
+            }
+            Button("キャンセル", role: .cancel) {}
         }
         .onAppear {
             isPlaying = false
-            currentTime = 0
-            sprintSegments = SessionDataManager.computeSprintSegments(gpsData.points)
-            timeSeries = SessionDataManager.computeTimeSeries(gpsPoints: gpsData.points)
+            currentTime = displaySession.effectiveEndOffset ?? 0
+            sprintSegments = SessionDataManager.computeSprintSegments(effectivePoints)
+            timeSeries = SessionDataManager.computeTimeSeries(gpsPoints: effectivePoints)
             if let age = UserProfileManager.shared.age {
                 hrIntensity = SessionDataManager.computeHeartRateIntensity(
-                    gpsPoints: gpsData.points, age: age
+                    gpsPoints: effectivePoints, age: age
                 )
             }
+            // sprintCount は記録時点の古い閾値で保存されている場合があるため、
+            // staminaDrop計算済みかどうかに関わらず、現在の閾値で再計算した値とズレていれば同期する
+            let sprintCnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
             // 派生メトリクスが未保存なら算出して永続化し、Supabaseにアップロード（初回閲覧時）
-            if session.staminaDrop == nil {
+            if displaySession.staminaDrop == nil {
                 let drop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
                 let hrRatio = hrIntensity?.highIntensityRatio
-                dataManager.updateComputedMetrics(for: session.id, staminaDrop: drop, hrIntensityRatio: hrRatio)
-                let sprintCnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
+                dataManager.updateComputedMetrics(for: session.id, staminaDrop: drop, hrIntensityRatio: hrRatio, sprintCount: sprintCnt)
                 let radar = SessionDataManager.computePlayerRadar(
-                    totalDistance: session.totalDistance,
-                    duration: session.duration,
+                    totalDistance: displaySession.totalDistance,
+                    duration: displaySession.duration,
                     sprintCount: sprintCnt,
-                    agilityTurnCount: session.agilityTurnCount,
+                    agilityTurnCount: displaySession.agilityTurnCount,
                     staminaDrop: drop,
                     hrIntensityRatio: hrRatio,
-                    maxSpeed: session.maxSpeed
+                    maxSpeed: displaySession.maxSpeed
                 )
                 // session は値型のため updateComputedMetrics の変更を反映していない。
                 // staminaDrop/hrIntensityRatio/sprintCount は今計算した値を明示的に上書きしてからアップロードする。
                 // sprintCount は session.sprintCount（記録時点の古い閾値での値）ではなく、
                 // 現在のプロフィール（年齢・性別）の閾値で再計算した sprintCnt を使う（radar計算と同じ値に揃える）
-                var updatedSession = session
+                var updatedSession = displaySession
                 updatedSession.staminaDrop = drop
                 updatedSession.hrIntensityRatio = hrRatio
                 updatedSession.sprintCount = sprintCnt
                 Task {
-                    try? await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
+                    do {
+                        try await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
+                        print("✅ Supabaseへの派生メトリクス再同期完了: id=\(updatedSession.id) duration=\(updatedSession.duration)")
+                    } catch {
+                        print("❌ Supabaseへの派生メトリクス再同期に失敗: id=\(updatedSession.id) error=\(error)")
+                    }
+                }
+            } else if displaySession.sprintCount != sprintCnt {
+                // staminaDropは計算済みだが、sprintCountだけ古い閾値の値のまま残っているセッションを同期
+                dataManager.updateComputedMetrics(
+                    for: session.id,
+                    staminaDrop: displaySession.staminaDrop,
+                    hrIntensityRatio: displaySession.hrIntensityRatio,
+                    sprintCount: sprintCnt
+                )
+                let radar = SessionDataManager.computePlayerRadar(
+                    totalDistance: displaySession.totalDistance,
+                    duration: displaySession.duration,
+                    sprintCount: sprintCnt,
+                    agilityTurnCount: displaySession.agilityTurnCount,
+                    staminaDrop: displaySession.staminaDrop,
+                    hrIntensityRatio: displaySession.hrIntensityRatio,
+                    maxSpeed: displaySession.maxSpeed
+                )
+                var updatedSession = displaySession
+                updatedSession.sprintCount = sprintCnt
+                Task {
+                    do {
+                        try await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
+                        print("✅ Supabaseへの派生メトリクス再同期完了: id=\(updatedSession.id) duration=\(updatedSession.duration)")
+                    } catch {
+                        print("❌ Supabaseへの派生メトリクス再同期に失敗: id=\(updatedSession.id) error=\(error)")
+                    }
                 }
             }
             if let field = currentField {
-                let cnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
                 syncDiagnosis = SessionDataManager.computeStyleSync(
-                    gpsData: gpsData,
+                    gpsData: effectiveGPSData,
                     field: field,
                     isFlipped: isFlipped,
-                    sprintCount: cnt,
-                    agilityTurnCount: session.agilityTurnCount,
-                    maxSpeed: session.maxSpeed
+                    sprintCount: sprintCnt,
+                    agilityTurnCount: displaySession.agilityTurnCount,
+                    maxSpeed: displaySession.maxSpeed
                 )
             }
         }
@@ -381,14 +500,14 @@ struct SessionDetailView: View {
         }
         .onChange(of: isFlipped) { _, flipped in
             if let field = currentField {
-                let cnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
+                let cnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
                 syncDiagnosis = SessionDataManager.computeStyleSync(
-                    gpsData: gpsData,
+                    gpsData: effectiveGPSData,
                     field: field,
                     isFlipped: flipped,
                     sprintCount: cnt,
-                    agilityTurnCount: session.agilityTurnCount,
-                    maxSpeed: session.maxSpeed
+                    agilityTurnCount: displaySession.agilityTurnCount,
+                    maxSpeed: displaySession.maxSpeed
                 )
             }
         }
@@ -404,12 +523,124 @@ struct SessionDetailView: View {
             }
         }
     }
+
+    // MARK: - Trim (打ち切り)
+
+    private struct TrimResult {
+        let duration: TimeInterval
+        let totalDistance: Double
+        let maxSpeed: Double
+        let avgSpeed: Double
+        let sprintCount: Int
+        let agilityTurnCount: Int
+        let agilityScore: Int
+        let staminaDrop: Double?
+        let hrIntensityRatio: Double?
+        let sprintSegments: [SprintSegment]
+        let timeSeries: [TimeSeriesBucket]
+        let hrIntensity: (highIntensityRatio: Double, highIntensitySprintCount: Int)?
+    }
+
+    /// points に対してトリム後の全メトリクスを計算する。points.count < 2 なら nil（打ち切り不可）
+    private func computeTrimResult(points: [GPSPoint]) -> TrimResult? {
+        guard let first = points.first, let last = points.last, points.count >= 2 else { return nil }
+        let duration = last.timestamp.timeIntervalSince(first.timestamp)
+        let timeSeries = SessionDataManager.computeTimeSeries(gpsPoints: points)
+        let totalDistance = timeSeries.map(\.distance).reduce(0, +)
+        let maxSpeed = points.map(\.speed).max() ?? 0
+        let avgSpeed = duration > 0 ? totalDistance / duration : 0
+        let sprintSegments = SessionDataManager.computeSprintSegments(points)
+        let staminaDrop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
+        let hrIntensity = UserProfileManager.shared.age.flatMap {
+            SessionDataManager.computeHeartRateIntensity(gpsPoints: points, age: $0)
+        }
+        let agilityEvents = SessionDataManager.detectAgilityEventsFromGPS(points)
+        let agilityScore: Int
+        if agilityEvents.isEmpty {
+            agilityScore = 0
+        } else {
+            let avgAngle = agilityEvents.map(\.magnitude).reduce(0, +) / Double(agilityEvents.count)
+            agilityScore = max(0, min(100, Int((avgAngle - 60.0) / 120.0 * 100)))
+        }
+
+        return TrimResult(
+            duration: duration, totalDistance: totalDistance, maxSpeed: maxSpeed, avgSpeed: avgSpeed,
+            sprintCount: sprintSegments.count, agilityTurnCount: agilityEvents.count, agilityScore: agilityScore,
+            staminaDrop: staminaDrop, hrIntensityRatio: hrIntensity?.highIntensityRatio,
+            sprintSegments: sprintSegments, timeSeries: timeSeries, hrIntensity: hrIntensity
+        )
+    }
+
+    /// 打ち切りを確定（offset: nil で「元に戻す」）。再計算した値を1つの updatedSession にまとめてから
+    /// ローカル永続化とSupabaseアップロードの両方に使う（片方だけ古い値のまま、というズレを防ぐため）
+    private func applyTrim(offset: TimeInterval?) async {
+        let points = SessionDataManager.trimmedPoints(gpsData.points, toOffset: offset)
+        guard let result = computeTrimResult(points: points) else { return }
+
+        currentTime = offset ?? 0
+
+        dataManager.applyTrim(
+            for: session.id,
+            effectiveEndOffset: offset,
+            duration: result.duration,
+            totalDistance: result.totalDistance,
+            maxSpeed: result.maxSpeed,
+            avgSpeed: result.avgSpeed,
+            sprintCount: result.sprintCount,
+            agilityTurnCount: result.agilityTurnCount,
+            agilityScore: result.agilityScore,
+            staminaDrop: result.staminaDrop,
+            hrIntensityRatio: result.hrIntensityRatio
+        )
+
+        var updatedSession = displaySession
+        updatedSession.effectiveEndOffset = offset
+        updatedSession.duration = result.duration
+        updatedSession.totalDistance = result.totalDistance
+        updatedSession.maxSpeed = result.maxSpeed
+        updatedSession.avgSpeed = result.avgSpeed
+        updatedSession.sprintCount = result.sprintCount
+        updatedSession.agilityTurnCount = result.agilityTurnCount
+        updatedSession.agilityScore = result.agilityScore
+        updatedSession.staminaDrop = result.staminaDrop
+        updatedSession.hrIntensityRatio = result.hrIntensityRatio
+
+        let radar = SessionDataManager.computePlayerRadar(
+            totalDistance: updatedSession.totalDistance,
+            duration: updatedSession.duration,
+            sprintCount: updatedSession.sprintCount ?? 0,
+            agilityTurnCount: updatedSession.agilityTurnCount,
+            staminaDrop: updatedSession.staminaDrop,
+            hrIntensityRatio: updatedSession.hrIntensityRatio,
+            maxSpeed: updatedSession.maxSpeed
+        )
+        do {
+            try await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
+            print("✅ トリム結果のSupabaseアップロード完了: id=\(updatedSession.id) offset=\(String(describing: offset)) duration=\(updatedSession.duration)")
+        } catch {
+            print("❌ トリム結果のSupabaseアップロードに失敗: id=\(updatedSession.id) offset=\(String(describing: offset)) error=\(error)")
+        }
+
+        sprintSegments = result.sprintSegments
+        timeSeries = result.timeSeries
+        hrIntensity = result.hrIntensity
+        if let field = currentField {
+            syncDiagnosis = SessionDataManager.computeStyleSync(
+                gpsData: GPSData(sessionId: gpsData.sessionId, points: points),
+                field: field,
+                isFlipped: isFlipped,
+                sprintCount: result.sprintCount,
+                agilityTurnCount: result.agilityTurnCount,
+                maxSpeed: result.maxSpeed
+            )
+        }
+    }
     
     // MARK: - Heatmap View
     
     private func heatmapView(field: Field) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            FieldHeatmapView(gpsData: gpsData, field: field, isFlipped: isFlipped)
+            FieldHeatmapView(gpsData: effectiveGPSData, field: field, isFlipped: isFlipped)
                 .frame(height: 600)
             
             fieldControlsRow
@@ -572,18 +803,18 @@ struct SessionDetailView: View {
     
     private func statisticsView(field: Field) -> some View {
         let thirdRatios = SessionDataManager.computeThirdRatios(
-            gpsData: gpsData, field: field, isFlipped: isFlipped
+            gpsData: effectiveGPSData, field: field, isFlipped: isFlipped
         )
         let staminaDrop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
-        let sprintCnt = sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count
+        let sprintCnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
         let radar = SessionDataManager.computePlayerRadar(
-            totalDistance: session.totalDistance,
-            duration: session.duration,
+            totalDistance: displaySession.totalDistance,
+            duration: displaySession.duration,
             sprintCount: sprintCnt,
-            agilityTurnCount: session.agilityTurnCount,
+            agilityTurnCount: displaySession.agilityTurnCount,
             staminaDrop: staminaDrop,
             hrIntensityRatio: hrIntensity?.highIntensityRatio,
-            maxSpeed: session.maxSpeed
+            maxSpeed: displaySession.maxSpeed
         )
 
         return VStack(alignment: .leading, spacing: 16) {
@@ -592,21 +823,21 @@ struct SessionDetailView: View {
                 .padding(.horizontal)
 
             VStack(spacing: 12) {
-                StatisticRow(label: "総距離", value: formatDistance(session.totalDistance), icon: "figure.walk")
-                StatisticRow(label: "時間", value: formatDuration(session.duration), icon: "clock.fill")
-                StatisticRow(label: "平均速度", value: String(format: "%.1f km/h", session.avgSpeed * 3.6), icon: "speedometer")
-                StatisticRow(label: "最高速度", value: String(format: "%.1f km/h", session.maxSpeed * 3.6), icon: "flame.fill")
+                StatisticRow(label: "総距離", value: formatDistance(displaySession.totalDistance), icon: "figure.walk")
+                StatisticRow(label: "時間", value: formatDuration(displaySession.duration), icon: "clock.fill")
+                StatisticRow(label: "平均速度", value: String(format: "%.1f km/h", displaySession.avgSpeed * 3.6), icon: "speedometer")
+                StatisticRow(label: "最高速度", value: String(format: "%.1f km/h", displaySession.maxSpeed * 3.6), icon: "flame.fill")
 
                 StatisticRow(
                     label: "スプリント回数",
-                    value: sprintSegments.isEmpty && session.sprintCount == nil
+                    value: sprintSegments.isEmpty && displaySession.sprintCount == nil
                         ? "--"
-                        : "\(sprintSegments.isEmpty ? (session.sprintCount ?? 0) : sprintSegments.count)回",
+                        : "\(sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count)回",
                     icon: "bolt.fill"
                 )
                 StatisticRow(
                     label: "アジリティ回数",
-                    value: session.agilityTurnCount.map { "\($0)回" } ?? "--",
+                    value: displaySession.agilityTurnCount.map { "\($0)回" } ?? "--",
                     icon: "arrow.triangle.turn.up.right.diamond.fill"
                 )
 
@@ -632,7 +863,7 @@ struct SessionDetailView: View {
             AICoachFeedbackSection(
                 session: session,
                 sessionSummary: SessionDataManager.buildFeedbackSummaryText(
-                    session: session,
+                    session: displaySession,
                     thirdRatios: thirdRatios,
                     staminaDropRate: staminaDrop,
                     radar: radar,
@@ -684,7 +915,10 @@ struct SessionDetailView: View {
                 .padding(.horizontal)
             
             VStack(spacing: 12) {
-                StatisticRow(label: "GPSポイント数", value: "\(gpsData.points.count)点", icon: "location.fill")
+                StatisticRow(label: "GPSポイント数（生データ）", value: "\(gpsData.points.count)点", icon: "location.fill")
+                if displaySession.isTrimmed {
+                    StatisticRow(label: "GPSポイント数（トリム後）", value: "\(effectivePoints.count)点", icon: "scissors")
+                }
                 StatisticRow(label: "フィールド", value: field.name, icon: "map")
                 StatisticRow(label: "フィールドサイズ", value: "\(Int(field.dimensions.length))m × \(Int(field.dimensions.width))m", icon: "ruler")
                 

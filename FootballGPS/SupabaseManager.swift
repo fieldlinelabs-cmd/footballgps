@@ -57,7 +57,10 @@ class SupabaseManager {
     // MARK: - session_summaries テーブル
 
     func uploadSessionSummary(_ session: TrainingSession, radar: PlayerRadarData) async throws {
-        guard let userId = currentUserId else { return }
+        guard let userId = currentUserId else {
+            print("❌ uploadSessionSummary: currentUserIdがnilのためアップロードをスキップ: session=\(session.id)")
+            return
+        }
         let row = SessionSummaryRow(
             userId: userId,
             localSessionId: session.id,
@@ -82,7 +85,7 @@ class SupabaseManager {
             radarOverallScore: radar.overallScore,
             playerType: radar.playerType.rawValue
         )
-        try await client.from("session_summaries").upsert(row).execute()
+        try await client.from("session_summaries").upsert(row, onConflict: "user_id,local_session_id").execute()
     }
 
     // MARK: - calibration_results テーブル
@@ -246,7 +249,7 @@ class SupabaseManager {
     }
 
     /// AI監督フィードバックを生成する（§20.5.3）。`ticketId` が nil の場合は fail-open
-    /// （広告なし、1日30回まで。TestFlightソロテスト期間中の緩和値。§20.6参照）として扱われる。
+    /// （広告なし、1日3回まで。§20.6参照）として扱われる。
     func fetchAICoachFeedback(
         ticketId: String?,
         localSessionId: String,

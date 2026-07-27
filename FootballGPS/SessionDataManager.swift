@@ -591,6 +591,36 @@ class SessionDataManager: ObservableObject {
         return segments
     }
 
+    // MARK: - Trim (打ち切り)
+
+    /// 経過秒（先頭点からの秒数）に対応する points 内インデックスを二分探索で返す
+    static func gpsIndex(in points: [GPSPoint], atElapsed offset: TimeInterval) -> Int {
+        guard let first = points.first else { return 0 }
+        var lo = 0
+        var hi = points.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if points[mid].timestamp.timeIntervalSince(first.timestamp) <= offset {
+                lo = mid
+            } else {
+                hi = mid - 1
+            }
+        }
+        return lo
+    }
+
+    /// offset までの GPS 点列を返す。offset が nil、または points が空ならそのまま返す（トリムなし）
+    static func trimmedPoints(_ points: [GPSPoint], toOffset offset: TimeInterval?) -> [GPSPoint] {
+        guard let offset, !points.isEmpty else { return points }
+        return Array(points[0...gpsIndex(in: points, atElapsed: offset)])
+    }
+
+    /// トリム設定を適用した「有効な」GPSデータを返す。生ファイルは変更しない
+    func getEffectiveGPSData(for session: TrainingSession) -> GPSData? {
+        guard let full = getGPSData(for: session.id) else { return nil }
+        return GPSData(sessionId: full.sessionId, points: SessionDataManager.trimmedPoints(full.points, toOffset: session.effectiveEndOffset))
+    }
+
     /// GPSデータを取得
     func getGPSData(for sessionId: String) -> GPSData? {
         if let cached = gpsDataCache[sessionId] {
@@ -944,10 +974,13 @@ class SessionDataManager: ObservableObject {
     }
 
     /// セッション詳細閲覧時に算出した派生メトリクスを永続化
-    func updateComputedMetrics(for sessionId: String, staminaDrop: Double?, hrIntensityRatio: Double?) {
+    func updateComputedMetrics(for sessionId: String, staminaDrop: Double?, hrIntensityRatio: Double?, sprintCount: Int? = nil) {
         guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
         sessions[index].staminaDrop = staminaDrop
         sessions[index].hrIntensityRatio = hrIntensityRatio
+        if let sprintCount {
+            sessions[index].sprintCount = sprintCount
+        }
         persistSessions()
     }
 
@@ -955,6 +988,35 @@ class SessionDataManager: ObservableObject {
     func updateExcludeFromAverage(for sessionId: String, excluded: Bool) {
         guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
         sessions[index].excludeFromAverage = excluded
+        persistSessions()
+    }
+
+    /// 打ち切り（トリム）設定と、トリム後の点列から再計算した派生メトリクスをまとめて永続化する。
+    /// effectiveEndOffset に nil を渡すと「元に戻す」になる（トリムなし・生データ全体で再計算した値を書き戻す）
+    func applyTrim(
+        for sessionId: String,
+        effectiveEndOffset: TimeInterval?,
+        duration: TimeInterval,
+        totalDistance: Double,
+        maxSpeed: Double,
+        avgSpeed: Double,
+        sprintCount: Int,
+        agilityTurnCount: Int,
+        agilityScore: Int,
+        staminaDrop: Double?,
+        hrIntensityRatio: Double?
+    ) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].effectiveEndOffset = effectiveEndOffset
+        sessions[index].duration = duration
+        sessions[index].totalDistance = totalDistance
+        sessions[index].maxSpeed = maxSpeed
+        sessions[index].avgSpeed = avgSpeed
+        sessions[index].sprintCount = sprintCount
+        sessions[index].agilityTurnCount = agilityTurnCount
+        sessions[index].agilityScore = agilityScore
+        sessions[index].staminaDrop = staminaDrop
+        sessions[index].hrIntensityRatio = hrIntensityRatio
         persistSessions()
     }
 

@@ -64,7 +64,7 @@ struct SprintMeasurementView: View {
 
     private func loadSessions() {
         sessionResults = dataManager.sessions.compactMap { session in
-            guard let gpsData = dataManager.getGPSData(for: session.id) else { return nil }
+            guard let gpsData = dataManager.getEffectiveGPSData(for: session) else { return nil }
             let maxSpeed = gpsData.points.map(\.speed).max() ?? 0
             guard maxSpeed * 3.6 >= 8.0 else { return nil }
             return (session.name, session.date, maxSpeed, maxSpeed * 3.6)

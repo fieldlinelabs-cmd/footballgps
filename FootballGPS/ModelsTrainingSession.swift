@@ -51,6 +51,12 @@ struct TrainingSession: Identifiable, Codable {
 
     /// 自己平均から除外されるか（手動 or 5分未満）
     var isExcludedFromAverage: Bool { excludeFromAverage ?? false }
+
+    // トリム（打ち切り）設定: 先頭GPS点からの経過秒。nil = トリムなし（生データ全体を使用、旧データとの後方互換用）
+    var effectiveEndOffset: TimeInterval?
+
+    /// トリムが適用されているか
+    var isTrimmed: Bool { effectiveEndOffset != nil }
     
     enum SessionVisibility: String, Codable {
         case `public` = "public"
