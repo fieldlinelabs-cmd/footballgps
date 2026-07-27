@@ -81,18 +81,25 @@ AdMobで実際のApp ID・広告ユニットIDを発行し、コードに反映�
 - アプリがApp Storeにリンクされ広告配信が承認されてから、本番広告ユニットでのSSV検証を
   改めて確認すること
 
-## 8. fail-open上限の一時緩和（2026-07-13）
+## 8. fail-open上限（2026-07-25時点: 1日3回）
 
-TestFlightでのソロテスト期間中、本番広告がno-fillし続けるため、fail-openの1日上限を
-3回→**30回**に緩和した（`supabase/functions/ai-coach-feedback/index.ts` の
-`FAIL_OPEN_DAILY_LIMIT`）。**この変更を反映するには再デプロイが必要:**
+TestFlightでのソロテスト期間中、本番広告がno-fillし続けるため、一時的にfail-openの
+1日上限を3回→30回に緩和していたが、TestFlightでのテスター配信（複数人）にあたり
+2026-07-25に**3回に戻した**（`supabase/functions/_shared/geminiRateLimit.ts` の
+`DEFAULT_FAIL_OPEN_DAILY_LIMIT` を3に変更し、Supabase Secrets
+`FAIL_OPEN_DAILY_LIMIT=3` を再設定、`ai-coach-feedback`・`ai-nickname` を再デプロイ済み）。
+
+AI監督フィードバックと二つ名生成は独立してカウントされるため、広告なしでは
+1ユーザーあたり最大で「AI監督フィードバック3回 + 二つ名生成3回 = 6回/日」まで生成できる。
+広告視聴経由の生成（1チケットにつき最大3回消費可能）はこの上限に含まれない。
+
+値を変更する場合:
 
 ```sh
+supabase secrets set FAIL_OPEN_DAILY_LIMIT=<値>
 supabase functions deploy ai-coach-feedback
+supabase functions deploy ai-nickname
 ```
-
-アプリがApp Storeにリンクされ広告配信が承認され、本番広告での生成が主流になったら
-`FAIL_OPEN_DAILY_LIMIT` を3程度に戻すこと。
 
 ## 検証
 

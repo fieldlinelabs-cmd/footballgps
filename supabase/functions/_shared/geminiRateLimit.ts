@@ -12,7 +12,7 @@ type AdminClient = ReturnType<typeof createAdminClient>;
 // （エラーレスポンスの quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier, limit: 20 で確認）。
 // 失敗した呼び出し（429以外のエラー）もクォータを消費しうるため、20よりかなり低い値に設定する。
 const DEFAULT_GLOBAL_DAILY_LIMIT = 15;
-const DEFAULT_FAIL_OPEN_DAILY_LIMIT = 2;
+const DEFAULT_FAIL_OPEN_DAILY_LIMIT = 3;
 
 /** プロジェクト全体で直近24時間のGemini呼び出し合計が上限未満かどうかを返す。 */
 export async function checkGlobalDailyAllowance(admin: AdminClient): Promise<boolean> {
