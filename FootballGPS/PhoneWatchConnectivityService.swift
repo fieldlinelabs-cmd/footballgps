@@ -72,9 +72,18 @@ class PhoneWatchConnectivityService: NSObject, ObservableObject {
         
         print("✅ GPSData復元成功: \(gpsData.points.count)ポイント")
         
-        // データマネージャーに保存 (fieldId未設定のまま。ユーザーがセッション詳細画面で手動選択)
+        // データマネージャーに保存 (fieldIdは自動選択を試み、失敗した場合のみユーザーが手動選択)
         SessionDataManager.shared.saveSession(session, gpsData: gpsData)
-        
+
+        // フィールド自動選択: 一致すればfieldIdを永続化し、ドリル分割の再解析も連鎖して行われる
+        let fieldAssigned = SessionDataManager.shared.autoAssignFieldId(for: session.id)
+
+        // fieldIdが自動確定しなかった場合のみ、ドリル自動分割を内部判定のみで試す
+        // （フィールドが特定でき、休憩が検出できた場合のみ候補として保存される。それ以外は無処理）
+        if !fieldAssigned {
+            SessionDataManager.shared.analyzeForDrillSplits(sessionId: session.id)
+        }
+
         print("✅ セッションデータ受信完了: \(session.name)")
     }
     

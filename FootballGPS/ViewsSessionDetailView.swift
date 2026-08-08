@@ -390,14 +390,14 @@ struct SessionDetailView: View {
             isPresented: $showTrimConfirm,
             titleVisibility: .visible
         ) {
-            if computeTrimResult(points: SessionDataManager.trimmedPoints(gpsData.points, toOffset: currentTime)) != nil {
+            if SessionDataManager.computeSegmentStats(points: SessionDataManager.trimmedPoints(gpsData.points, toOffset: currentTime)) != nil {
                 Button("打ち切る") {
                     Task { await applyTrim(offset: currentTime) }
                 }
             }
             Button("キャンセル", role: .cancel) {}
         } message: {
-            if let preview = computeTrimResult(points: SessionDataManager.trimmedPoints(gpsData.points, toOffset: currentTime)) {
+            if let preview = SessionDataManager.computeSegmentStats(points: SessionDataManager.trimmedPoints(gpsData.points, toOffset: currentTime)) {
                 Text("時間: \(formatDuration(displaySession.duration)) → \(formatDuration(preview.duration))\n距離: \(formatDistance(displaySession.totalDistance)) → \(formatDistance(preview.totalDistance))")
             } else {
                 Text("この位置では短すぎて打ち切れません")
@@ -526,56 +526,11 @@ struct SessionDetailView: View {
 
     // MARK: - Trim (打ち切り)
 
-    private struct TrimResult {
-        let duration: TimeInterval
-        let totalDistance: Double
-        let maxSpeed: Double
-        let avgSpeed: Double
-        let sprintCount: Int
-        let agilityTurnCount: Int
-        let agilityScore: Int
-        let staminaDrop: Double?
-        let hrIntensityRatio: Double?
-        let sprintSegments: [SprintSegment]
-        let timeSeries: [TimeSeriesBucket]
-        let hrIntensity: (highIntensityRatio: Double, highIntensitySprintCount: Int)?
-    }
-
-    /// points に対してトリム後の全メトリクスを計算する。points.count < 2 なら nil（打ち切り不可）
-    private func computeTrimResult(points: [GPSPoint]) -> TrimResult? {
-        guard let first = points.first, let last = points.last, points.count >= 2 else { return nil }
-        let duration = last.timestamp.timeIntervalSince(first.timestamp)
-        let timeSeries = SessionDataManager.computeTimeSeries(gpsPoints: points)
-        let totalDistance = timeSeries.map(\.distance).reduce(0, +)
-        let maxSpeed = points.map(\.speed).max() ?? 0
-        let avgSpeed = duration > 0 ? totalDistance / duration : 0
-        let sprintSegments = SessionDataManager.computeSprintSegments(points)
-        let staminaDrop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
-        let hrIntensity = UserProfileManager.shared.age.flatMap {
-            SessionDataManager.computeHeartRateIntensity(gpsPoints: points, age: $0)
-        }
-        let agilityEvents = SessionDataManager.detectAgilityEventsFromGPS(points)
-        let agilityScore: Int
-        if agilityEvents.isEmpty {
-            agilityScore = 0
-        } else {
-            let avgAngle = agilityEvents.map(\.magnitude).reduce(0, +) / Double(agilityEvents.count)
-            agilityScore = max(0, min(100, Int((avgAngle - 60.0) / 120.0 * 100)))
-        }
-
-        return TrimResult(
-            duration: duration, totalDistance: totalDistance, maxSpeed: maxSpeed, avgSpeed: avgSpeed,
-            sprintCount: sprintSegments.count, agilityTurnCount: agilityEvents.count, agilityScore: agilityScore,
-            staminaDrop: staminaDrop, hrIntensityRatio: hrIntensity?.highIntensityRatio,
-            sprintSegments: sprintSegments, timeSeries: timeSeries, hrIntensity: hrIntensity
-        )
-    }
-
     /// 打ち切りを確定（offset: nil で「元に戻す」）。再計算した値を1つの updatedSession にまとめてから
     /// ローカル永続化とSupabaseアップロードの両方に使う（片方だけ古い値のまま、というズレを防ぐため）
     private func applyTrim(offset: TimeInterval?) async {
         let points = SessionDataManager.trimmedPoints(gpsData.points, toOffset: offset)
-        guard let result = computeTrimResult(points: points) else { return }
+        guard let result = SessionDataManager.computeSegmentStats(points: points) else { return }
 
         currentTime = offset ?? 0
 

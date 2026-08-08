@@ -29,14 +29,22 @@ class FieldManager: ObservableObject {
         fields.append(field)
         persistFields()
         print("✅ フィールド追加: \(field.name)")
+
+        // フィールド未登録のため fieldId 未確定・ドリル分割未検出だったセッションを再解析する
+        SessionDataManager.shared.autoAssignFieldIdForUnresolvedSessions()
+        SessionDataManager.shared.reanalyzeSessionsForDrillSplits()
     }
-    
+
     /// フィールドを更新
     func updateField(_ field: Field) {
         if let index = fields.firstIndex(where: { $0.id == field.id }) {
             fields[index] = field
             persistFields()
             print("✅ フィールド更新: \(field.name)")
+
+            // 境界の変更で新たに一致率が上がるセッションがあるかもしれないため再解析する
+            SessionDataManager.shared.autoAssignFieldIdForUnresolvedSessions()
+            SessionDataManager.shared.reanalyzeSessionsForDrillSplits()
         }
     }
     
@@ -52,17 +60,21 @@ class FieldManager: ObservableObject {
         return fields.first { $0.id == id }
     }
     
+    /// GPS座標から最適なフィールドを自動判定する際の最低一致率。
+    /// 休憩の多い（＝フィールド外の時間が長い）練習でも検出できるよう、低めに設定している。
+    /// ドリル分割の内部判定とfieldId自動選択の両方がこの値を共有する（意図的、別基準にしない）
+    static let matchRateThreshold: Double = 0.4
+
     /// GPS座標から最適なフィールドを自動判定
     func detectField(for gpsPoints: [GPSPoint]) -> Field? {
         guard !gpsPoints.isEmpty else { return nil }
-        
+
         var bestMatch: (field: Field, rate: Double)?
-        
+
         for field in fields {
             let rate = field.matchRate(for: gpsPoints)
-            
-            // 80%以上のポイントが範囲内にあれば該当フィールド
-            if rate >= 0.8 {
+
+            if rate >= FieldManager.matchRateThreshold {
                 if bestMatch == nil || rate > bestMatch!.rate {
                     bestMatch = (field, rate)
                 }

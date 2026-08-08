@@ -621,6 +621,177 @@ class SessionDataManager: ObservableObject {
         return GPSData(sessionId: full.sessionId, points: SessionDataManager.trimmedPoints(full.points, toOffset: session.effectiveEndOffset))
     }
 
+    /// from〜to（先頭点からの経過秒、[from, to]）の範囲でGPS点列を切り出す
+    static func slicedPoints(_ points: [GPSPoint], from startOffset: TimeInterval, to endOffset: TimeInterval) -> [GPSPoint] {
+        guard !points.isEmpty else { return [] }
+        let startIndex = gpsIndex(in: points, atElapsed: startOffset)
+        let endIndex = gpsIndex(in: points, atElapsed: endOffset)
+        guard endIndex >= startIndex else { return [] }
+        return Array(points[startIndex...endIndex])
+    }
+
+    /// GPS点列の部分区間から算出した全メトリクス（トリム・ドリル分割の両方で共有）
+    struct SegmentStats {
+        let duration: TimeInterval
+        let totalDistance: Double
+        let maxSpeed: Double
+        let avgSpeed: Double
+        let sprintCount: Int
+        let agilityTurnCount: Int
+        let agilityScore: Int
+        let staminaDrop: Double?
+        let hrIntensityRatio: Double?
+        let sprintSegments: [SprintSegment]
+        let timeSeries: [TimeSeriesBucket]
+        let hrIntensity: (highIntensityRatio: Double, highIntensitySprintCount: Int)?
+    }
+
+    /// points に対して全メトリクスを計算する。points.count < 2 なら nil（算出不可）
+    static func computeSegmentStats(points: [GPSPoint]) -> SegmentStats? {
+        guard let first = points.first, let last = points.last, points.count >= 2 else { return nil }
+        let duration = last.timestamp.timeIntervalSince(first.timestamp)
+        let timeSeries = computeTimeSeries(gpsPoints: points)
+        let totalDistance = timeSeries.map(\.distance).reduce(0, +)
+        let maxSpeed = points.map(\.speed).max() ?? 0
+        let avgSpeed = duration > 0 ? totalDistance / duration : 0
+        let sprintSegments = computeSprintSegments(points)
+        let staminaDrop = computeStaminaDropRate(buckets: timeSeries)
+        let hrIntensity = UserProfileManager.shared.age.flatMap {
+            computeHeartRateIntensity(gpsPoints: points, age: $0)
+        }
+        let agilityEvents = detectAgilityEventsFromGPS(points)
+        let agilityScore: Int
+        if agilityEvents.isEmpty {
+            agilityScore = 0
+        } else {
+            let avgAngle = agilityEvents.map(\.magnitude).reduce(0, +) / Double(agilityEvents.count)
+            agilityScore = max(0, min(100, Int((avgAngle - 60.0) / 120.0 * 100)))
+        }
+
+        return SegmentStats(
+            duration: duration, totalDistance: totalDistance, maxSpeed: maxSpeed, avgSpeed: avgSpeed,
+            sprintCount: sprintSegments.count, agilityTurnCount: agilityEvents.count, agilityScore: agilityScore,
+            staminaDrop: staminaDrop, hrIntensityRatio: hrIntensity?.highIntensityRatio,
+            sprintSegments: sprintSegments, timeSeries: timeSeries, hrIntensity: hrIntensity
+        )
+    }
+
+    // MARK: - Drill Split (ドリル自動分割)
+
+    /// セッションに対し、フィールド境界の外＋低速度の滞留からドリル休憩を自動検出する。
+    /// セッションに既に fieldId が紐付いていればそのフィールドを優先的に使い、
+    /// 未紐付けなら GPS 点列からの自動判定（`detectField`）にフォールバックする。
+    /// フィールドが特定できない、または休憩が2区間未満（=分割不要）の場合は何もしない。
+    ///
+    /// Watch→iPhone転送直後だけでなく、フィールドが後から登録・更新された場合や
+    /// セッションに手動でフィールドが紐付けられた場合にも再実行される（`reanalyzeSessionsForDrillSplits`,
+    /// `updateFieldId` から呼ばれる）。転送時点でフィールド未登録だと最初の解析は何も検出できないため。
+    func analyzeForDrillSplits(sessionId: String) {
+        guard let session = sessions.first(where: { $0.id == sessionId }),
+              let gpsData = getGPSData(for: sessionId) else { return }
+
+        let field: Field?
+        if let fieldId = session.fieldId {
+            field = FieldManager.shared.getField(by: fieldId)
+        } else {
+            field = FieldManager.shared.detectField(for: gpsData.points)
+        }
+        guard let field else { return }
+
+        let breaks = DrillSplitDetector.detectBreaks(points: gpsData.points, field: field)
+        let ranges = DrillSplitDetector.segmentRanges(totalDuration: session.duration, breaks: breaks)
+        guard ranges.count >= 2 else { return }
+
+        setPendingSplitBreaks(for: sessionId, breaks: breaks)
+        print("🏃 ドリル自動分割候補を検出: sessionId=\(sessionId) 検出本数=\(ranges.count)")
+    }
+
+    /// まだドリル分割を解析していない（=一度も検出されなかった、または対象フィールド未登録だった）
+    /// セッションをまとめて再解析する。フィールドの新規登録・更新のたびに呼ばれる。
+    func reanalyzeSessionsForDrillSplits() {
+        for session in sessions where session.pendingSplitBreaks == nil && !session.isSupersededBySplit {
+            analyzeForDrillSplits(sessionId: session.id)
+        }
+    }
+
+    /// ドリル自動分割の検出結果を保存（コーチの確認待ち）
+    func setPendingSplitBreaks(for sessionId: String, breaks: [DrillBreakInterval]) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].pendingSplitBreaks = breaks
+        persistSessions()
+    }
+
+    /// 検出された分割候補を破棄し、1本のセッションのまま残す
+    func dismissPendingSplit(for sessionId: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].pendingSplitBreaks = nil
+        persistSessions()
+    }
+
+    /// 検出されたドリル分割を確定する。生トレースを区間ごとに切り出し、それぞれを独立した
+    /// TrainingSession として保存・Supabaseアップロードする。元の結合セッションは削除せず
+    /// supersededBySplit フラグでソフト除外する（分割ミスがあった場合に復旧可能にするため）。
+    func confirmDrillSplit(for sessionId: String) async {
+        guard let original = sessions.first(where: { $0.id == sessionId }),
+              let breaks = original.pendingSplitBreaks, !breaks.isEmpty,
+              let rawGPS = getGPSData(for: sessionId) else { return }
+
+        let ranges = DrillSplitDetector.segmentRanges(totalDuration: original.duration, breaks: breaks)
+        guard ranges.count >= 2 else {
+            dismissPendingSplit(for: sessionId)
+            return
+        }
+
+        for (i, range) in ranges.enumerated() {
+            let points = SessionDataManager.slicedPoints(rawGPS.points, from: range.start, to: range.end)
+            guard let stats = SessionDataManager.computeSegmentStats(points: points) else { continue }
+
+            let newSession = TrainingSession(
+                userId: original.userId,
+                teamId: original.teamId,
+                fieldId: original.fieldId,
+                name: "\(original.name) - ドリル\(i + 1)",
+                date: original.date.addingTimeInterval(range.start),
+                duration: stats.duration,
+                visibility: original.visibility,
+                totalDistance: stats.totalDistance,
+                maxSpeed: stats.maxSpeed,
+                avgSpeed: stats.avgSpeed,
+                isFlipped: original.isFlipped,
+                staminaDrop: stats.staminaDrop,
+                hrIntensityRatio: stats.hrIntensityRatio
+            )
+
+            // saveSession が GPS データから sprintCount / agility を再計算して確定させる
+            saveSession(newSession, gpsData: GPSData(sessionId: newSession.id, points: points))
+
+            // stale コピーを使わず、saveSession が確定させた最新の状態を sessions 配列から読み直してアップロードする
+            guard let saved = sessions.first(where: { $0.id == newSession.id }) else { continue }
+            let radar = SessionDataManager.computePlayerRadar(
+                totalDistance: saved.totalDistance,
+                duration: saved.duration,
+                sprintCount: saved.sprintCount ?? 0,
+                agilityTurnCount: saved.agilityTurnCount,
+                staminaDrop: saved.staminaDrop,
+                hrIntensityRatio: saved.hrIntensityRatio,
+                maxSpeed: saved.maxSpeed
+            )
+            do {
+                try await SupabaseManager.shared.uploadSessionSummary(saved, radar: radar)
+                print("✅ 分割セッションのSupabaseアップロード完了: id=\(saved.id)")
+            } catch {
+                print("❌ 分割セッションのSupabaseアップロード失敗: id=\(saved.id) error=\(error)")
+            }
+        }
+
+        if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+            sessions[index].supersededBySplit = true
+            sessions[index].pendingSplitBreaks = nil
+            persistSessions()
+        }
+        print("✅ ドリル分割確定完了: 元sessionId=\(sessionId) 分割数=\(ranges.count)")
+    }
+
     /// GPSデータを取得
     func getGPSData(for sessionId: String) -> GPSData? {
         if let cached = gpsDataCache[sessionId] {
@@ -958,12 +1129,39 @@ class SessionDataManager: ObservableObject {
         print("🔄 セッション再読み込み完了: \(sessions.count)件")
     }
 
-    /// セッションのフィールドIDを更新（ユーザーが手動選択したとき）
+    /// セッションのフィールドIDを更新（ユーザーが手動選択したとき、または自動選択が成功したとき）
     func updateFieldId(for sessionId: String, fieldId: String) {
         guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
         sessions[index].fieldId = fieldId
         persistSessions()
         print("✅ フィールド紐付け更新: sessionId=\(sessionId) -> fieldId=\(fieldId)")
+
+        // フィールドが判明したことで、未解析だったドリル分割を再解析する
+        if sessions[index].pendingSplitBreaks == nil && !sessions[index].isSupersededBySplit {
+            analyzeForDrillSplits(sessionId: sessionId)
+        }
+    }
+
+    /// fieldId未設定のセッションに対し、GPS点列から`FieldManager.detectField`で一致するフィールドを
+    /// 探し、見つかれば`updateFieldId`で自動的に永続化する（ユーザーの手動選択を待たない）。
+    /// `updateFieldId`が内部で`analyzeForDrillSplits`の再解析も連鎖して行うため、ここでは呼ばない
+    /// （再帰防止: このメソッドは `analyzeForDrillSplits` / `updateFieldId` からは呼び出さない）
+    @discardableResult
+    func autoAssignFieldId(for sessionId: String) -> Bool {
+        guard let session = sessions.first(where: { $0.id == sessionId }), session.fieldId == nil,
+              let gpsData = getGPSData(for: sessionId),
+              let field = FieldManager.shared.detectField(for: gpsData.points) else { return false }
+        updateFieldId(for: sessionId, fieldId: field.id)
+        print("📍 フィールド自動選択: sessionId=\(sessionId) -> fieldId=\(field.id)")
+        return true
+    }
+
+    /// まだ fieldId が未確定のセッションをまとめて自動選択を試みる。
+    /// フィールドの新規登録・境界編集のたびに呼ばれる
+    func autoAssignFieldIdForUnresolvedSessions() {
+        for session in sessions where session.fieldId == nil {
+            autoAssignFieldId(for: session.id)
+        }
     }
 
     /// セッションのコート入れ替えフラグを更新

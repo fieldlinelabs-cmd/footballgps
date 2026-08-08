@@ -57,6 +57,16 @@ struct TrainingSession: Identifiable, Codable {
 
     /// トリムが適用されているか
     var isTrimmed: Bool { effectiveEndOffset != nil }
+
+    // ドリル自動分割: 自動検出された未確認の休憩区間（nil = 未解析 or 解析対象外 or 解決済み）
+    var pendingSplitBreaks: [DrillBreakInterval]?
+    // ↑ DrillBreakInterval はこのファイル下部で定義（Watchアプリターゲットとも共有するため）
+
+    // この結合セッションが、確定した自動分割によって置き換えられたか（nil = false、旧データとの後方互換用）
+    var supersededBySplit: Bool?
+
+    /// 分割によって置き換えられ、一覧・平均計算から除外されるべきか
+    var isSupersededBySplit: Bool { supersededBySplit ?? false }
     
     enum SessionVisibility: String, Codable {
         case `public` = "public"
@@ -85,7 +95,9 @@ struct TrainingSession: Identifiable, Codable {
         agilityScore: Int? = nil,
         staminaDrop: Double? = nil,
         hrIntensityRatio: Double? = nil,
-        excludeFromAverage: Bool? = nil
+        excludeFromAverage: Bool? = nil,
+        pendingSplitBreaks: [DrillBreakInterval]? = nil,
+        supersededBySplit: Bool? = nil
     ) {
         self.id = id
         self.userId = userId
@@ -108,6 +120,8 @@ struct TrainingSession: Identifiable, Codable {
         self.staminaDrop = staminaDrop
         self.hrIntensityRatio = hrIntensityRatio
         self.excludeFromAverage = excludeFromAverage
+        self.pendingSplitBreaks = pendingSplitBreaks
+        self.supersededBySplit = supersededBySplit
     }
     
     /// デフォルトのセッション名（日時ベース）
@@ -141,6 +155,14 @@ struct TrainingSession: Identifiable, Codable {
 
         return dict
     }
+}
+
+/// ドリル自動分割: 検出された休憩区間（先頭GPS点からの経過秒）。
+/// 検知ロジック本体（DrillSplitDetector）はiPhone側専用だが、この型は
+/// TrainingSession.pendingSplitBreaks の一部としてWatchアプリターゲットとも共有する
+struct DrillBreakInterval: Codable, Equatable {
+    let startOffset: TimeInterval
+    let endOffset: TimeInterval
 }
 
 /// GPS座標データポイント

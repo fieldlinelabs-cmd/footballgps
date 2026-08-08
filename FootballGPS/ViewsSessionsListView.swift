@@ -11,7 +11,8 @@ import Combine
 struct SessionsListView: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
     @ObservedObject private var connectivityService = PhoneWatchConnectivityService.shared
-    
+    @State private var splitReviewSession: TrainingSession?
+
     var body: some View {
         NavigationStack {
             Group {
@@ -32,6 +33,9 @@ struct SessionsListView: View {
                             .foregroundStyle(connectivityService.isPaired ? .green : .secondary)
                     }
                 }
+            }
+            .sheet(item: $splitReviewSession) { session in
+                DrillSplitReviewView(session: session)
             }
         }
     }
@@ -85,6 +89,17 @@ struct SessionsListView: View {
                                 .tint(session.isExcludedFromAverage ? .green : .orange)
                             }
                         }
+
+                        if let breaks = session.pendingSplitBreaks {
+                            let count = DrillSplitDetector.segmentRanges(totalDuration: session.duration, breaks: breaks).count
+                            Button {
+                                splitReviewSession = session
+                            } label: {
+                                Label("🏃 \(count)本のドリルを検出 — 確認する", systemImage: "arrow.triangle.branch")
+                                    .font(.caption)
+                            }
+                            .tint(.blue)
+                        }
                     }
                 } header: {
                     Text(formatSectionDate(date))
@@ -112,7 +127,7 @@ struct SessionsListView: View {
     
     // セッションを日付でグループ化
     private var groupedSessions: [Date: [TrainingSession]] {
-        Dictionary(grouping: dataManager.sessions) { session in
+        Dictionary(grouping: dataManager.sessions.filter { !$0.isSupersededBySplit }) { session in
             Calendar.current.startOfDay(for: session.date)
         }
     }

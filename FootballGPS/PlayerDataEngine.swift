@@ -46,7 +46,7 @@ enum PlayerDataEngine {
     /// 既存の統計表示（ViewsSessionDetailView等）と同じ基準。プレイヤーデータ機能の
     /// 全計算（比較カード・レーダーチャート・バッジ）はこのフィルタを通したセッションのみを使う。
     private static func eligibleSessions(_ sessions: [TrainingSession]) -> [TrainingSession] {
-        sessions.filter { $0.duration >= 300 && !$0.isExcludedFromAverage }
+        sessions.filter { $0.duration >= 300 && !$0.isExcludedFromAverage && !$0.isSupersededBySplit }
     }
 
     /// 直近セッション vs 直近5回（今回を除く）の平均距離。
