@@ -188,6 +188,9 @@ struct PlayerDataView: View {
                     VStack(spacing: 2) {
                         Text(formatDistance(comparison.currentDistance))
                             .font(.title3.bold())
+                        Text(formatDuration(comparison.currentDuration))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         Text("今回")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -204,6 +207,9 @@ struct PlayerDataView: View {
                     VStack(spacing: 2) {
                         Text(formatDistance(comparison.recentAverageDistance))
                             .font(.title3.bold())
+                        Text(formatDuration(comparison.recentAverageDuration))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         Text("直近5回平均")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -223,6 +229,16 @@ struct PlayerDataView: View {
 
     private func formatDistance(_ meters: Double) -> String {
         meters >= 1000 ? String(format: "%.1fkm", meters / 1000) : String(format: "%.0fm", meters)
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let hours = Int(seconds) / 3600
+        let minutes = Int(seconds) / 60 % 60
+        if hours > 0 {
+            return "\(hours)時間\(minutes)分"
+        } else {
+            return "\(minutes)分"
+        }
     }
 
     // MARK: - レーダーチャート（直近5回平均・自己ベスト・直前のセッション）

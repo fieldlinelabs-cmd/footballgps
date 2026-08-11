@@ -40,6 +40,8 @@ enum PlayerDataEngine {
         let recentAverageDistance: Double
         let percentDiff: Double
         let recentSessionCount: Int
+        let currentDuration: TimeInterval
+        let recentAverageDuration: TimeInterval
     }
 
     /// 平均・バッジ判定の対象とするセッション（5分未満・「平均から除外」指定は対象外）。
@@ -59,11 +61,14 @@ enum PlayerDataEngine {
         let avg = recent5.reduce(0.0) { $0 + $1.totalDistance } / Double(recent5.count)
         guard avg > 0 else { return nil }
         let diff = (current.totalDistance - avg) / avg * 100
+        let avgDuration = recent5.reduce(0.0) { $0 + $1.duration } / Double(recent5.count)
         return SessionComparison(
             currentDistance: current.totalDistance,
             recentAverageDistance: avg,
             percentDiff: diff,
-            recentSessionCount: recent5.count
+            recentSessionCount: recent5.count,
+            currentDuration: current.duration,
+            recentAverageDuration: avgDuration
         )
     }
 
