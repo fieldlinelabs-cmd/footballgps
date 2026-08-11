@@ -32,46 +32,28 @@ class PhoneWatchConnectivityService: NSObject, ObservableObject {
         }
     }
     
-    /// セッションデータを受信して保存
-    private func handleReceivedData(_ data: [String: Any]) {
-        print("📥 データ受信開始...")
-        print("📦 受信データ内容: \(data.keys)")
-        
-        guard let type = data["type"] as? String,
-              type == "trainingSession" else {
-            print("⚠️ 不明なデータタイプ: \(data["type"] ?? "nil")")
+    /// Watchから転送されたセッション＋GPSデータのJSONファイルを読み込み保存する。
+    /// sendMessage/transferUserInfo（辞書ベース）はペイロードサイズの実務上の上限により長時間
+    /// セッションで転送に失敗する事例が確認されたため、rawMotionと同じくファイル転送に統一した
+    private func processReceivedSessionFile(_ url: URL) {
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        guard let data = try? Data(contentsOf: url) else {
+            print("❌ trainingSessionファイル読み込み失敗")
             return
         }
-        
-        print("✅ データタイプ確認: trainingSession")
-        
-        // セッションデータを解析
-        guard let sessionDict = data["session"] as? [String: Any],
-              let gpsDataDict = data["gpsData"] as? [String: Any] else {
-            print("❌ データ解析失敗")
-            print("   - session: \(data["session"] != nil ? "あり" : "なし")")
-            print("   - gpsData: \(data["gpsData"] != nil ? "あり" : "なし")")
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let payload = try? decoder.decode(SessionTransferPayload.self, from: data) else {
+            print("❌ trainingSessionデコード失敗")
             return
         }
-        
-        print("✅ セッション辞書取得成功")
-        
-        // TrainingSessionを復元
-        guard var session = parseTrainingSession(from: sessionDict) else {
-            print("❌ TrainingSession復元失敗")
-            return
-        }
-        
-        print("✅ TrainingSession復元成功: \(session.name)")
-        
-        // GPSDataを復元
-        guard let gpsData = parseGPSData(from: gpsDataDict) else {
-            print("❌ GPSData復元失敗")
-            return
-        }
-        
-        print("✅ GPSData復元成功: \(gpsData.points.count)ポイント")
-        
+
+        let session = payload.session
+        let gpsData = payload.gpsData
+        print("✅ セッション受信成功: \(session.name), GPS点数=\(gpsData.points.count)")
+
         // データマネージャーに保存 (fieldIdは自動選択を試み、失敗した場合のみユーザーが手動選択)
         SessionDataManager.shared.saveSession(session, gpsData: gpsData)
 
@@ -85,80 +67,6 @@ class PhoneWatchConnectivityService: NSObject, ObservableObject {
         }
 
         print("✅ セッションデータ受信完了: \(session.name)")
-    }
-    
-    // MARK: - Parsing
-    
-    private func parseTrainingSession(from dict: [String: Any]) -> TrainingSession? {
-        guard let id = dict["id"] as? String,
-              let userId = dict["userId"] as? String,
-              let name = dict["name"] as? String,
-              let dateTimestamp = dict["date"] as? TimeInterval,
-              let duration = dict["duration"] as? TimeInterval,
-              let totalDistance = dict["totalDistance"] as? Double,
-              let maxSpeed = dict["maxSpeed"] as? Double,
-              let avgSpeed = dict["avgSpeed"] as? Double else {
-            return nil
-        }
-        
-        let date = Date(timeIntervalSince1970: dateTimestamp)
-        let teamId = dict["teamId"] as? String
-        let fieldId = dict["fieldId"] as? String
-        let visibilityStr = dict["visibility"] as? String ?? "private"
-        let visibility = TrainingSession.SessionVisibility(rawValue: visibilityStr) ?? .private
-        let sprintCount = dict["sprintCount"] as? Int
-        let gpsDataPath = dict["gpsDataPath"] as? String
-        let heartRate = dict["heartRate"] as? Double
-        let activeCalories = dict["activeCalories"] as? Double
-
-        return TrainingSession(
-            id: id,
-            userId: userId,
-            teamId: teamId,
-            fieldId: fieldId,
-            name: name,
-            date: date,
-            duration: duration,
-            visibility: visibility,
-            totalDistance: totalDistance,
-            maxSpeed: maxSpeed,
-            avgSpeed: avgSpeed,
-            sprintCount: sprintCount,
-            gpsDataPath: gpsDataPath,
-            heartRate: heartRate,
-            activeCalories: activeCalories
-        )
-    }
-    
-    private func parseGPSData(from dict: [String: Any]) -> GPSData? {
-        guard let sessionId = dict["sessionId"] as? String,
-              let pointsArray = dict["points"] as? [[String: Any]] else {
-            return nil
-        }
-        
-        let points = pointsArray.compactMap { pointDict -> GPSPoint? in
-            guard let timestamp = pointDict["timestamp"] as? TimeInterval,
-                  let latitude = pointDict["latitude"] as? Double,
-                  let longitude = pointDict["longitude"] as? Double,
-                  let speed = pointDict["speed"] as? Double,
-                  let altitude = pointDict["altitude"] as? Double,
-                  let horizontalAccuracy = pointDict["horizontalAccuracy"] as? Double else {
-                return nil
-            }
-            
-            let heartRate = pointDict["heartRate"] as? Double
-            return GPSPoint(
-                timestamp: Date(timeIntervalSince1970: timestamp),
-                latitude: latitude,
-                longitude: longitude,
-                speed: speed,
-                altitude: altitude,
-                horizontalAccuracy: horizontalAccuracy,
-                heartRate: heartRate
-            )
-        }
-        
-        return GPSData(sessionId: sessionId, points: points)
     }
 }
 
@@ -198,33 +106,7 @@ extension PhoneWatchConnectivityService: WCSessionDelegate {
         }
     }
     
-    // リアルタイムメッセージ受信
-    nonisolated func session(
-        _ session: WCSession,
-        didReceiveMessage message: [String: Any],
-        replyHandler: @escaping ([String: Any]) -> Void
-    ) {
-        Task { @MainActor in
-            print("📥 リアルタイムメッセージ受信")
-            self.handleReceivedData(message)
-            
-            // 応答を返す
-            replyHandler(["status": "received"])
-        }
-    }
-    
-    // キューイングデータ受信
-    nonisolated func session(
-        _ session: WCSession,
-        didReceiveUserInfo userInfo: [String: Any] = [:]
-    ) {
-        Task { @MainActor in
-            print("📥 キューイングデータ受信")
-            self.handleReceivedData(userInfo)
-        }
-    }
-
-    // ファイル受信（rawMotion JSON / キャリブレーションCSV）
+    // ファイル受信（セッション+GPS JSON / rawMotion JSON / キャリブレーションCSV）
     nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
         let metadata = file.metadata
         guard let type = metadata?["type"] as? String else {
@@ -233,6 +115,29 @@ extension PhoneWatchConnectivityService: WCSessionDelegate {
         }
 
         switch type {
+        case "trainingSession":
+            guard let sessionId = metadata?["sessionId"] as? String else {
+                print("⚠️ trainingSession: sessionId がメタデータに含まれていません")
+                return
+            }
+            // WCSessionFile.fileURL はこのデリゲートメソッドの実行中しか有効性が保証されないため、
+            // 非同期処理に渡す前に同期的に永続領域へコピーする（このメソッドはnonisolatedなので同期I/Oのみ許容）
+            let destURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("received_session_\(sessionId).json")
+            do {
+                if FileManager.default.fileExists(atPath: destURL.path) {
+                    try FileManager.default.removeItem(at: destURL)
+                }
+                try FileManager.default.copyItem(at: file.fileURL, to: destURL)
+            } catch {
+                print("❌ trainingSessionファイルのコピー失敗: \(error)")
+                return
+            }
+            Task { @MainActor in
+                print("📥 trainingSessionファイル受信: sessionId=\(sessionId)")
+                PhoneWatchConnectivityService.shared.processReceivedSessionFile(destURL)
+            }
+
         case "rawMotion":
             guard let sessionId = metadata?["sessionId"] as? String else {
                 print("⚠️ rawMotion: sessionId がメタデータに含まれていません")

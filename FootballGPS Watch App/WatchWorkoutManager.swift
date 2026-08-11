@@ -37,6 +37,9 @@ class WorkoutManager: NSObject, ObservableObject {
     @Published var gpsPoints: [GPSPoint] = []
     @Published var peakAcceleration: Double = 0 // G（最大加速度）
 
+    // 終了直後にgpsPointsをクリアした後も、サマリー画面に点数を表示するための保持用
+    @Published var lastGPSPointCount: Int = 0
+
     // MARK: - Private Properties
 
     // CoreMotion（加速度記録）
@@ -82,7 +85,7 @@ class WorkoutManager: NSObject, ObservableObject {
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = 2 // 2メートルごとに更新
         locationManager.activityType = .fitness
-        
+
         // バックグラウンド位置情報更新（実機のみ有効化）
         // Info.plist に UIBackgroundModes (location, workout-processing) が必要
         #if !targetEnvironment(simulator)
@@ -117,6 +120,11 @@ class WorkoutManager: NSObject, ObservableObject {
     
     /// ワークアウトを開始
     func startWorkout() async throws {
+        // 前回セッションの終了処理（完了ボタン押下）が行われないまま次のワークアウトが
+        // 開始された場合に、gpsPoints/rawMotionSamples/locations等が残留し新セッションの
+        // データに積み増しされてしまうのを防ぐため、開始時に必ずクリアする
+        reset()
+
         #if !targetEnvironment(simulator)
         // 実機のみ: HealthKit Workout Session を作成
         print("🏃 実機モード: HealthKit Workout Session を作成します")
@@ -224,13 +232,21 @@ class WorkoutManager: NSObject, ObservableObject {
         print("📍 記録したポイント数: \(gpsPoints.count)")
         print("📳 加速度サンプル数: \(rawMotionSamples.count)")
 
-        // iPhoneへセッション＋GPSデータを送信
+        // iPhoneへセッション＋GPSデータを送信（送信処理は内部で独立したコピーを作ってから
+        // バックグラウンドで転送するため、この直後に元データをクリアしても転送には影響しない）
         sendDataToiPhone()
 
-        // rawMotionファイルを転送（実機のみ）
+        // rawMotionファイルを転送（実機のみ、同様に内部でコピーしてから転送する）
         #if !targetEnvironment(simulator)
         writeAndTransferRawMotion()
         #endif
+
+        // 転送用のコピーは渡し終えたので、サマリー画面用に点数だけ残して元データはここで解放する。
+        // 「完了」ボタンや次回の開始時まで待つと、その間ずっと生データがメモリに残り続けてしまうため
+        lastGPSPointCount = gpsPoints.count
+        gpsPoints.removeAll()
+        rawMotionSamples.removeAll()
+        locations.removeAll()
     }
     
     /// iPhoneへセッションデータを送信
@@ -356,6 +372,7 @@ class WorkoutManager: NSObject, ObservableObject {
         locations.removeAll()
         gpsPoints.removeAll()
         rawMotionSamples.removeAll()
+        lastGPSPointCount = 0
         peakAcceleration = 0
         startDate = nil
         totalPausedDuration = 0

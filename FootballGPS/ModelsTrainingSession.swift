@@ -202,6 +202,14 @@ struct GPSData: Codable {
     let points: [GPSPoint]
 }
 
+/// Watch→iPhone間のセッション＋GPSデータ転送用ペイロード（JSONファイルに書き出しtransferFileで送る）。
+/// sendMessage/transferUserInfoはペイロードサイズに実務上の上限があり、長時間セッション（GPS点数が多い）
+/// で転送に失敗するリスクがあったため、rawMotionと同じくファイル転送に統一した
+struct SessionTransferPayload: Codable {
+    let session: TrainingSession
+    let gpsData: GPSData
+}
+
 /// 加速度生データサンプル（Watch→iPhone転送用・非永続化）
 struct RawMotionSample: Codable {
     let timestamp: TimeInterval  // Date().timeIntervalSince1970

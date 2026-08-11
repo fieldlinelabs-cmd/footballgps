@@ -34,71 +34,50 @@ class WatchConnectivityService: NSObject, ObservableObject {
         }
     }
     
-    /// セッションデータをiPhoneに送信
+    /// セッションデータをiPhoneに送信（ファイル転送）。
+    /// sendMessage/transferUserInfoはペイロードサイズに実務上の上限があり、長時間セッション
+    /// （GPS点数が多い）で転送に失敗する事例が確認されたため、rawMotionと同じくJSONファイルに
+    /// 書き出してtransferFileで送る方式に統一した（reachability に関わらずバックグラウンドで届く）
     func sendSession(_ session: TrainingSession, gpsData: GPSData) {
         guard WCSession.default.activationState == .activated else {
             print("❌ WatchConnectivity未初期化")
             return
         }
-        
-        // データを辞書形式に変換
-        let data: [String: Any] = [
-            "type": "trainingSession",
-            "session": session.dictionary,
-            "gpsData": [
-                "sessionId": gpsData.sessionId,
-                "points": gpsData.points.map { point -> [String: Any] in
-                    var dict: [String: Any] = [
-                        "timestamp": point.timestamp.timeIntervalSince1970,
-                        "latitude": point.latitude,
-                        "longitude": point.longitude,
-                        "speed": point.speed,
-                        "altitude": point.altitude,
-                        "horizontalAccuracy": point.horizontalAccuracy
-                    ]
-                    if let hr = point.heartRate, hr > 0 { dict["heartRate"] = hr }
-                    return dict
+
+        let payload = SessionTransferPayload(session: session, gpsData: gpsData)
+        let url = Self.sessionTransferTempURL(sessionId: session.id)
+
+        Task.detached {
+            do {
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                let data = try encoder.encode(payload)
+                try FileManager.default.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try data.write(to: url, options: .atomic)
+                print("💾 セッションファイル書き込み完了: \(url.lastPathComponent) (\(data.count) bytes, \(gpsData.points.count)点)")
+                await MainActor.run {
+                    let metadata: [String: Any] = ["type": "trainingSession", "sessionId": session.id]
+                    WCSession.default.transferFile(url, metadata: metadata)
+                    print("📤 セッションファイル転送キュー追加: \(url.lastPathComponent)")
                 }
-            ]
-        ]
-        
-        // 1️⃣ まずリアルタイム送信を試みる（iPhoneが近くにあれば即座に送信）
-        if WCSession.default.isReachable {
-            print("📡 iPhone到達可能 - リアルタイム送信を試みます")
-            WCSession.default.sendMessage(data, replyHandler: { reply in
-                Task { @MainActor in
-                    print("✅ リアルタイム送信成功")
-                    if let status = reply["status"] as? String {
-                        print("📱 iPhoneからの応答: \(status)")
-                    }
-                }
-            }, errorHandler: { error in
-                Task { @MainActor in
-                    print("⚠️ リアルタイム送信失敗: \(error.localizedDescription)")
-                    print("📦 キューイング送信にフォールバック")
-                    self.queueTransfer(data)
-                }
-            })
-        } else {
-            // 2️⃣ 圏外ならキューイング送信（後で自動送信）
-            print("📦 iPhone圏外 - キューイング送信")
-            queueTransfer(data)
+            } catch {
+                print("❌ セッションファイル書き込みエラー: \(error)")
+            }
         }
     }
-    
-    /// キューイング送信（後で自動送信）
-    private func queueTransfer(_ data: [String: Any]) {
-        let transfer = WCSession.default.transferUserInfo(data)
-        print("📥 キューに追加")
-        print("🔄 未送信データ数: \(WCSession.default.outstandingUserInfoTransfers.count)")
-        
-        // transferはバックグラウンドで自動的に送信される
-        // 送信完了はdidFinish transferUserInfoで通知される
+
+    private static func sessionTransferTempURL(sessionId: String) -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("FootballGPS/sessionTransfer", isDirectory: true)
+            .appendingPathComponent("session_\(sessionId).json")
     }
-    
-    /// 未送信データの数を取得
+
+    /// 未送信データの数を取得（rawMotion・セッションデータ、いずれもファイル転送に統一済み）
     var pendingTransferCount: Int {
-        WCSession.default.outstandingUserInfoTransfers.count
+        WCSession.default.outstandingFileTransfers.count
     }
 
     /// rawMotion ファイルを iPhone へ転送
@@ -110,6 +89,34 @@ class WatchConnectivityService: NSObject, ObservableObject {
         let metadata: [String: Any] = ["type": "rawMotion", "sessionId": sessionId]
         WCSession.default.transferFile(url, metadata: metadata)
         print("📤 rawMotion ファイル転送キュー追加: \(url.lastPathComponent)")
+    }
+
+    /// 転送が既に完了・失敗して放置された孤立ファイルを掃除する。
+    /// `outstandingFileTransfers`に含まれていない（＝システム側がもう扱っていない）のに
+    /// ローカルに残っているファイルは、二度と使われることのないゴミなので削除する。
+    /// アプリ起動（WCSessionアクティベート）のたびに呼ばれる
+    static func cleanUpOrphanedTransferFiles(session: WCSession) {
+        let activeURLs = Set(session.outstandingFileTransfers.map { $0.file.fileURL.path })
+
+        let appSupportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        let sessionTransferDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FootballGPS/sessionTransfer", isDirectory: true)
+
+        var removedCount = 0
+        for dir in [appSupportDir, sessionTransferDir].compactMap({ $0 }) {
+            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            for file in files {
+                let name = file.lastPathComponent
+                guard name.hasPrefix("rawmotion_") || name.hasPrefix("session_") else { continue }
+                guard !activeURLs.contains(file.path) else { continue }
+                if (try? FileManager.default.removeItem(at: file)) != nil {
+                    removedCount += 1
+                }
+            }
+        }
+        if removedCount > 0 {
+            print("🧹 孤立した転送用一時ファイルを削除: \(removedCount)件")
+        }
     }
 
 }
@@ -128,7 +135,20 @@ extension WatchConnectivityService: WCSessionDelegate {
         } else {
             print("✅ WatchConnectivity初期化完了: \(activationState.rawValue)")
         }
-        
+
+        // 旧バージョン（sendMessage/transferUserInfo方式）でキューイングされたまま残っている可能性のある
+        // 未送信データを破棄する。iPhone側は受信処理(didReceiveUserInfo)を廃止済みのため、放置すると
+        // 二度と届かないままシステムのキューに残り続けてしまう
+        let staleTransfers = session.outstandingUserInfoTransfers
+        if !staleTransfers.isEmpty {
+            print("🧹 旧方式(transferUserInfo)の未送信キューを破棄: \(staleTransfers.count)件")
+            staleTransfers.forEach { $0.cancel() }
+        }
+
+        // 転送が既に完了・失敗して放置された孤立ファイル（didFinishでの削除処理が入る前の
+        // 旧バージョン時代に失敗したものを含む）を掃除する
+        Self.cleanUpOrphanedTransferFiles(session: session)
+
         // 接続状態を更新
         DispatchQueue.main.async { [weak self] in
             self?.isReachable = session.isReachable
@@ -154,29 +174,18 @@ extension WatchConnectivityService: WCSessionDelegate {
     
     nonisolated func session(
         _ session: WCSession,
-        didFinish userInfoTransfer: WCSessionUserInfoTransfer,
-        error: Error?
-    ) {
-        if let error = error {
-            print("❌ キューイング送信失敗: \(error.localizedDescription)")
-        } else {
-            print("✅ キューイング送信完了")
-            print("🔄 残り未送信データ数: \(session.outstandingUserInfoTransfers.count)")
-        }
-    }
-
-    nonisolated func session(
-        _ session: WCSession,
         didFinish fileTransfer: WCSessionFileTransfer,
         error: Error?
     ) {
         let name = fileTransfer.file.fileURL.lastPathComponent
+        let type = fileTransfer.file.metadata?["type"] as? String ?? "unknown"
         if let error {
-            print("❌ rawMotion ファイル転送失敗: \(name) - \(error.localizedDescription)")
+            print("❌ ファイル転送失敗 (\(type)): \(name) - \(error.localizedDescription)")
         } else {
-            print("✅ rawMotion ファイル転送完了: \(name)")
-            // Watch 側の一時ファイルを削除
-            try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+            print("✅ ファイル転送完了 (\(type)): \(name)")
         }
+        // 成功・失敗いずれの場合も、didFinishが呼ばれた時点でシステム側はこの転送試行を終えている
+        // （＝これ以上リトライされない）ため、Watch側の一時ファイルはここで削除してストレージに残さない
+        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
     }
 }
