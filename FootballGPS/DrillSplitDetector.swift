@@ -24,42 +24,71 @@ enum DrillSplitConfig {
 
 enum DrillSplitDetector {
 
-    /// GPS点列とフィールドから休憩区間を検出する（純粋関数）
+    /// GPS点列とフィールドから休憩区間を検出する（純粋関数）。
+    ///
+    /// フィールドに最初に入った時刻より前、および最後にフィールド内にいた時刻より後は、
+    /// 速度に関わらず無条件で休憩（＝ドリルではない移動時間）とみなす。コーチが実際に
+    /// フィールドへ向かう・フィールドから帰る移動は、普通の速さ（低速度しきい値超）で
+    /// 行われることが多く、フィールド在中区間と同じ「低速度」条件を適用すると、この移動
+    /// 時間が誤って独立した1本のドリルとして検出されてしまうため。
+    /// フィールド在中区間の内部でのみ、これまで通り「外＋低速度60秒」で休憩を検出する
+    /// （一瞬フィールド境界をまたいだだけか、本当の休憩かの曖昧さがあるため速度判定が必要）。
     static func detectBreaks(points: [GPSPoint], field: Field) -> [DrillBreakInterval] {
-        guard let first = points.first, points.count >= 2 else { return [] }
+        guard let first = points.first, let last = points.last, points.count >= 2 else { return [] }
 
-        var breaks: [DrillBreakInterval] = []
-        var breakStartOffset: TimeInterval? = nil
-
-        func isOutsideLowSpeed(_ point: GPSPoint) -> Bool {
-            let coordinate = CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            return !field.contains(coordinate: coordinate) && point.speed < DrillSplitConfig.lowSpeedThreshold
+        func offset(of point: GPSPoint) -> TimeInterval {
+            point.timestamp.timeIntervalSince(first.timestamp)
+        }
+        func isInsideField(_ point: GPSPoint) -> Bool {
+            field.contains(coordinate: CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude))
         }
 
-        for point in points {
-            let offset = point.timestamp.timeIntervalSince(first.timestamp)
+        guard let firstInsideIndex = points.firstIndex(where: isInsideField),
+              let lastInsideIndex = points.lastIndex(where: isInsideField) else {
+            return []
+        }
+        let fieldEntryOffset = offset(of: points[firstInsideIndex])
+        let fieldExitOffset = offset(of: points[lastInsideIndex])
+        let totalDuration = offset(of: last)
+
+        var breaks: [DrillBreakInterval] = []
+
+        // フィールドに入る前の移動時間は速度に関わらず無条件で除外する
+        if fieldEntryOffset > 0 {
+            breaks.append(DrillBreakInterval(startOffset: 0, endOffset: fieldEntryOffset))
+        }
+
+        // フィールド在中区間でのみ、外＋低速度60秒の休憩検出を行う
+        func isOutsideLowSpeed(_ point: GPSPoint) -> Bool {
+            !isInsideField(point) && point.speed < DrillSplitConfig.lowSpeedThreshold
+        }
+
+        var breakStartOffset: TimeInterval? = nil
+        for point in points[firstInsideIndex...lastInsideIndex] {
+            let currentOffset = offset(of: point)
             let outside = isOutsideLowSpeed(point)
 
             if let start = breakStartOffset {
                 if !outside {
                     // フィールドに戻る or 速度が上がった → 休憩終了。継続時間が閾値以上なら確定
-                    if offset - start >= DrillSplitConfig.minBenchDwellDuration {
-                        breaks.append(DrillBreakInterval(startOffset: start, endOffset: offset))
+                    if currentOffset - start >= DrillSplitConfig.minBenchDwellDuration {
+                        breaks.append(DrillBreakInterval(startOffset: start, endOffset: currentOffset))
                     }
                     breakStartOffset = nil
                 }
                 // outside が継続中なら何もしない（滞留継続）
             } else if outside {
-                breakStartOffset = offset
+                breakStartOffset = currentOffset
             }
         }
+        // フィールド在中区間の終わりまで休憩状態が続いていた場合
+        if let start = breakStartOffset, fieldExitOffset - start >= DrillSplitConfig.minBenchDwellDuration {
+            breaks.append(DrillBreakInterval(startOffset: start, endOffset: fieldExitOffset))
+        }
 
-        // トレース終了まで休憩状態が続いていた場合（練習終了時点でフィールド外にいたまま終了）
-        if let start = breakStartOffset, let last = points.last {
-            let endOffset = last.timestamp.timeIntervalSince(first.timestamp)
-            if endOffset - start >= DrillSplitConfig.minBenchDwellDuration {
-                breaks.append(DrillBreakInterval(startOffset: start, endOffset: endOffset))
-            }
+        // フィールドを出た後の移動時間も速度に関わらず無条件で除外する
+        if fieldExitOffset < totalDuration {
+            breaks.append(DrillBreakInterval(startOffset: fieldExitOffset, endOffset: totalDuration))
         }
 
         return breaks

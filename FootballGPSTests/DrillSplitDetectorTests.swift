@@ -79,8 +79,57 @@ struct DrillSplitDetectorTests {
 
         let breaks = DrillSplitDetector.detectBreaks(points: points, field: field)
         #expect(breaks.count == 1)
-        #expect(breaks[0].startOffset == 125)
+        // フィールド内と確認できた最後の点(120)が退場後休憩の開始点になる（速度に関わらず無条件除外のため）
+        #expect(breaks[0].startOffset == 120)
         #expect(breaks[0].endOffset == 215)
+    }
+
+    @Test func フィールド入場前の通常速度の徒歩は速度に関わらず除外される() {
+        // 開始直後、通常の速さ(低速度しきい値超)でフィールドへ歩く区間(90秒) → フィールド入場後ドリル
+        var points = run(from: 0, duration: 90, inside: false, speed: 1.5) // 1.5m/s > lowSpeedThreshold(1.0)
+        points += run(from: 95, duration: 120, inside: true, speed: 3.0)
+
+        let breaks = DrillSplitDetector.detectBreaks(points: points, field: field)
+        #expect(breaks.count == 1)
+        #expect(breaks[0].startOffset == 0)
+        #expect(breaks[0].endOffset == 95) // フィールドに最初に入った時刻
+
+        let totalDuration = points.last!.timestamp.timeIntervalSince(points.first!.timestamp)
+        let ranges = DrillSplitDetector.segmentRanges(totalDuration: totalDuration, breaks: breaks)
+        // 入場前の徒歩が偽のドリルとして残らないこと（ドリルは1本のみ）
+        #expect(ranges.count == 1)
+        #expect(ranges[0].start == 95)
+    }
+
+    @Test func フィールド退場後の通常速度の徒歩も速度に関わらず除外される() {
+        var points = run(from: 0, duration: 120, inside: true, speed: 3.0)
+        points += run(from: 125, duration: 90, inside: false, speed: 1.5) // 通常速度で退場後の徒歩
+
+        let breaks = DrillSplitDetector.detectBreaks(points: points, field: field)
+        #expect(breaks.count == 1)
+        #expect(breaks[0].startOffset == 120)
+
+        let totalDuration = points.last!.timestamp.timeIntervalSince(points.first!.timestamp)
+        let ranges = DrillSplitDetector.segmentRanges(totalDuration: totalDuration, breaks: breaks)
+        #expect(ranges.count == 1)
+        #expect(ranges[0].end == 120)
+    }
+
+    @Test func 入場前に速歩と静止が混在しても1つの除外区間としてまとまる() {
+        // ユーザー指摘の実運用シナリオ: 速歩(通常速度)で歩いた後、少し座って待つ、その後フィールドへ
+        var points = run(from: 0, duration: 90, inside: false, speed: 1.5)   // 速歩(90秒)
+        points += run(from: 95, duration: 70, inside: false, speed: 0.1)     // 静止(70秒)
+        points += run(from: 170, duration: 120, inside: true, speed: 3.0)    // フィールド内でドリル
+
+        let breaks = DrillSplitDetector.detectBreaks(points: points, field: field)
+        #expect(breaks.count == 1)
+        #expect(breaks[0].startOffset == 0)
+        #expect(breaks[0].endOffset == 170) // フィールドに最初に入った時刻
+
+        let totalDuration = points.last!.timestamp.timeIntervalSince(points.first!.timestamp)
+        let ranges = DrillSplitDetector.segmentRanges(totalDuration: totalDuration, breaks: breaks)
+        #expect(ranges.count == 1) // 速歩+静止の合計160秒が、偽のドリルにならず1つの除外区間にまとまる
+        #expect(ranges[0].start == 170)
     }
 
     @Test func 短すぎるドリル区間は分割対象から除外される() {
