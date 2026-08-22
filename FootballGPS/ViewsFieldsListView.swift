@@ -12,7 +12,27 @@ struct FieldsListView: View {
     @StateObject private var fieldManager = FieldManager.shared
     @State private var showingAddField = false
     @State private var editingField: Field? = nil
-    
+    @State private var actionField: Field? = nil
+    @State private var fieldPendingDeletion: Field? = nil
+
+    private var isActionDialogPresented: Binding<Bool> {
+        Binding(
+            get: { actionField != nil },
+            set: { isPresented in
+                if !isPresented { actionField = nil }
+            }
+        )
+    }
+
+    private var isDeleteConfirmPresented: Binding<Bool> {
+        Binding(
+            get: { fieldPendingDeletion != nil },
+            set: { isPresented in
+                if !isPresented { fieldPendingDeletion = nil }
+            }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -37,6 +57,33 @@ struct FieldsListView: View {
             }
             .sheet(item: $editingField) { field in
                 FieldEditorView(mode: .edit(field))
+            }
+            .confirmationDialog(
+                actionField?.name ?? "",
+                isPresented: isActionDialogPresented,
+                titleVisibility: .visible
+            ) {
+                if let field = actionField {
+                    Button("編集") {
+                        editingField = field
+                    }
+                    Button("削除", role: .destructive) {
+                        fieldPendingDeletion = field
+                    }
+                    Button("キャンセル", role: .cancel) {}
+                }
+            }
+            .confirmationDialog(
+                "「\(fieldPendingDeletion?.name ?? "")」を削除しますか？",
+                isPresented: isDeleteConfirmPresented,
+                titleVisibility: .visible
+            ) {
+                if let field = fieldPendingDeletion {
+                    Button("削除する", role: .destructive) {
+                        fieldManager.deleteField(field)
+                    }
+                    Button("キャンセル", role: .cancel) {}
+                }
             }
         }
     }
@@ -68,23 +115,15 @@ struct FieldsListView: View {
     private var fieldsList: some View {
         List {
             ForEach(fieldManager.fields) { field in
-                FieldRow(field: field)
-                .contextMenu {
-                    Button {
-                        editingField = field
-                    } label: {
-                        Label("編集", systemImage: "pencil")
-                    }
-                    
-                    Button(role: .destructive) {
-                        fieldManager.deleteField(field)
-                    } label: {
-                        Label("削除", systemImage: "trash")
-                    }
+                Button {
+                    actionField = field
+                } label: {
+                    FieldRow(field: field)
                 }
+                .buttonStyle(.plain)
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
-                        fieldManager.deleteField(field)
+                        fieldPendingDeletion = field
                     } label: {
                         Label("削除", systemImage: "trash")
                     }

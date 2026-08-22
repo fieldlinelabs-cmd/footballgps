@@ -223,9 +223,12 @@ struct MapFieldSetupView: View {
             }
             .onAppear {
                 loadExistingCorners()
-                locationHelper.requestLocation { coordinate in
-                    if let c = coordinate {
-                        region.center = c
+                // 既存の4隅が設定済みの場合は、その位置を優先し現在地で上書きしない
+                if !allCornersSet {
+                    locationHelper.requestLocation { coordinate in
+                        if let c = coordinate {
+                            region.center = c
+                        }
                     }
                 }
                 // シートアニメーション完了後にマップを生成（ゼロサイズ時のMetalクラッシュ防止）
