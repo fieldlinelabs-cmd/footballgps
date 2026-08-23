@@ -132,6 +132,37 @@ struct DrillSplitDetectorTests {
         #expect(ranges[0].start == 170)
     }
 
+    @Test func 中断が許容範囲内なら休憩は継続しているとみなされる() {
+        // ユーザーが実機で報告した不具合の再現: 退場〜再入場の間、完全に静止し続けたわけではなく
+        // 一瞬動いた(GPSノイズ含む)ことで休憩判定が途切れてしまうケース
+        var points = run(from: 0, duration: 60, inside: true, speed: 3.0)   // ドリル1
+        points += run(from: 65, duration: 30, inside: false, speed: 0.2)    // 静止(30秒): 65-95
+        points += [point(t: 100, inside: false, speed: 1.5), point(t: 105, inside: false, speed: 1.5)] // 短い中断(10秒、許容範囲内)
+        points += run(from: 110, duration: 30, inside: false, speed: 0.2)   // 静止再開(30秒): 110-140
+        points += run(from: 145, duration: 60, inside: true, speed: 3.0)    // ドリル2
+
+        let breaks = DrillSplitDetector.detectBreaks(points: points, field: field)
+        #expect(breaks.count == 1)
+        #expect(breaks[0].startOffset == 65)
+        #expect(breaks[0].endOffset == 145) // フィールドに戻った時刻で確定
+
+        let totalDuration = points.last!.timestamp.timeIntervalSince(points.first!.timestamp)
+        let ranges = DrillSplitDetector.segmentRanges(totalDuration: totalDuration, breaks: breaks)
+        #expect(ranges.count == 2) // ドリル1・ドリル2の2本に正しく分割される
+    }
+
+    @Test func 中断が許容範囲を超えると休憩は分断され60秒未満なら確定しない() {
+        var points = run(from: 0, duration: 60, inside: true, speed: 3.0)   // ドリル1
+        points += run(from: 65, duration: 30, inside: false, speed: 0.2)    // 静止(30秒、単体では60秒未満)
+        points += run(from: 100, duration: 20, inside: false, speed: 1.5)   // 中断(20秒 > 許容15秒)
+        points += run(from: 125, duration: 30, inside: false, speed: 0.2)   // 静止再開(30秒、これも単体では60秒未満)
+        points += run(from: 160, duration: 60, inside: true, speed: 3.0)    // ドリル2
+
+        let breaks = DrillSplitDetector.detectBreaks(points: points, field: field)
+        // 中断が許容範囲を超えるため休憩が前後半に分断され、どちらも60秒未満のため確定しない
+        #expect(breaks.isEmpty)
+    }
+
     @Test func 短すぎるドリル区間は分割対象から除外される() {
         // ドリル1(120s) → 休憩(70s) → ごく短いドリル(30s、閾値未満) → 休憩(70s) → ドリル2(120s)
         var points = run(from: 0, duration: 120, inside: true, speed: 3.0)

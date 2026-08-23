@@ -17,6 +17,9 @@ enum DrillSplitConfig {
     static let lowSpeedThreshold: Double = 1.0
     /// 分割後の1本が短すぎて無意味にならないための最小セグメント長（秒）
     static let minSegmentDuration: TimeInterval = 60
+    /// フィールド外での休憩中、GPSノイズや一瞬の動きで低速度条件を満たさない点が
+    /// 挟まっても、直前の適合点からこの秒数以内なら休憩が継続しているとみなす（調整可能）
+    static let interruptionTolerance: TimeInterval = 15
 }
 
 // DrillBreakInterval は TrainingSession.pendingSplitBreaks の型として
@@ -58,32 +61,46 @@ enum DrillSplitDetector {
             breaks.append(DrillBreakInterval(startOffset: 0, endOffset: fieldEntryOffset))
         }
 
-        // フィールド在中区間でのみ、外＋低速度60秒の休憩検出を行う
+        // フィールド在中区間でのみ、外＋低速度60秒の休憩検出を行う。
+        // フィールドに戻った場合は即座に休憩終了（現在時刻で確定）とする一方、
+        // フィールド外のまま速度だけ一瞬上がった場合は、GPSノイズや小さな動きの
+        // 可能性があるため、直前の適合点からinterruptionTolerance以内なら
+        // 休憩が継続しているとみなし、リセットしない
         func isOutsideLowSpeed(_ point: GPSPoint) -> Bool {
             !isInsideField(point) && point.speed < DrillSplitConfig.lowSpeedThreshold
         }
 
         var breakStartOffset: TimeInterval? = nil
+        var lastQualifyingOffset: TimeInterval? = nil
+
         for point in points[firstInsideIndex...lastInsideIndex] {
             let currentOffset = offset(of: point)
+            let inside = isInsideField(point)
             let outside = isOutsideLowSpeed(point)
 
-            if let start = breakStartOffset {
-                if !outside {
-                    // フィールドに戻る or 速度が上がった → 休憩終了。継続時間が閾値以上なら確定
-                    if currentOffset - start >= DrillSplitConfig.minBenchDwellDuration {
-                        breaks.append(DrillBreakInterval(startOffset: start, endOffset: currentOffset))
-                    }
-                    breakStartOffset = nil
+            if outside {
+                if breakStartOffset == nil {
+                    breakStartOffset = currentOffset
                 }
-                // outside が継続中なら何もしない（滞留継続）
-            } else if outside {
-                breakStartOffset = currentOffset
+                lastQualifyingOffset = currentOffset
+            } else if inside {
+                // フィールドに戻った → 中断許容とは関係なく即座に休憩終了、現在時刻で確定判定
+                if let start = breakStartOffset, currentOffset - start >= DrillSplitConfig.minBenchDwellDuration {
+                    breaks.append(DrillBreakInterval(startOffset: start, endOffset: currentOffset))
+                }
+                breakStartOffset = nil
+                lastQualifyingOffset = nil
+            } else if let start = breakStartOffset, let lastQualifying = lastQualifyingOffset,
+                      currentOffset - lastQualifying > DrillSplitConfig.interruptionTolerance {
+                // フィールド外のまま、直前の適合点から許容時間を超えて速度が高い状態が続いた
+                // → 中断とみなし、直前の適合点までを休憩として確定判定
+                if lastQualifying - start >= DrillSplitConfig.minBenchDwellDuration {
+                    breaks.append(DrillBreakInterval(startOffset: start, endOffset: lastQualifying))
+                }
+                breakStartOffset = nil
+                lastQualifyingOffset = nil
             }
-        }
-        // フィールド在中区間の終わりまで休憩状態が続いていた場合
-        if let start = breakStartOffset, fieldExitOffset - start >= DrillSplitConfig.minBenchDwellDuration {
-            breaks.append(DrillBreakInterval(startOffset: start, endOffset: fieldExitOffset))
+            // 許容範囲内の中断（フィールド外・速度高いが直近の適合点からtolerance以内）ならそのまま継続
         }
 
         // フィールドを出た後の移動時間も速度に関わらず無条件で除外する
