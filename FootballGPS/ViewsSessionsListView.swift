@@ -12,6 +12,7 @@ struct SessionsListView: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
     @ObservedObject private var connectivityService = PhoneWatchConnectivityService.shared
     @State private var splitReviewSession: TrainingSession?
+    @State private var pendingCascadeDeletion: TrainingSession?
 
     var body: some View {
         NavigationStack {
@@ -36,6 +37,26 @@ struct SessionsListView: View {
             }
             .sheet(item: $splitReviewSession) { session in
                 DrillSplitReviewView(session: session)
+            }
+            .confirmationDialog(
+                "分割前の元の記録も含めて完全に削除されます",
+                isPresented: Binding(
+                    get: { pendingCascadeDeletion != nil },
+                    set: { if !$0 { pendingCascadeDeletion = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("削除する", role: .destructive) {
+                    if let session = pendingCascadeDeletion {
+                        dataManager.deleteSession(session)
+                    }
+                    pendingCascadeDeletion = nil
+                }
+                Button("キャンセル", role: .cancel) {
+                    pendingCascadeDeletion = nil
+                }
+            } message: {
+                Text("これはこの分割グループで最後に残ったドリルです。削除すると、分割前の元の記録も一緒に完全に削除され、復元できなくなります。")
             }
         }
     }
@@ -69,7 +90,11 @@ struct SessionsListView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                dataManager.deleteSession(session)
+                                if dataManager.deletingSessionWouldAlsoDeleteOriginal(session) {
+                                    pendingCascadeDeletion = session
+                                } else {
+                                    dataManager.deleteSession(session)
+                                }
                             } label: {
                                 Label("削除", systemImage: "trash")
                             }

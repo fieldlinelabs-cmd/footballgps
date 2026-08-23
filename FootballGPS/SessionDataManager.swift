@@ -759,7 +759,8 @@ class SessionDataManager: ObservableObject {
                 avgSpeed: stats.avgSpeed,
                 isFlipped: original.isFlipped,
                 staminaDrop: stats.staminaDrop,
-                hrIntensityRatio: stats.hrIntensityRatio
+                hrIntensityRatio: stats.hrIntensityRatio,
+                splitFromSessionId: original.id
             )
 
             // saveSession が GPS データから sprintCount / agility を再計算して確定させる
@@ -792,6 +793,34 @@ class SessionDataManager: ObservableObject {
         print("✅ ドリル分割確定完了: 元sessionId=\(sessionId) 分割数=\(ranges.count)")
     }
 
+    /// ドリル分割を元に戻す。分割で作られたセッション（ドリルN）をすべて削除し、
+    /// 元の結合セッションのsupersededBySplitを解除して一覧・平均計算に復帰させる
+    func restoreSplit(originalSessionId: String) {
+        // 先にsupersededBySplitを解除しておく。deleteSession側の「最後の1本を消したら元セッションも
+        // 道連れで削除する」カスケードは isSupersededBySplit を条件にしているため、先に解除しておくことで
+        // 以下のループで最後のドリルを削除した際に元セッションが誤って削除されるのを防ぐ
+        if let index = sessions.firstIndex(where: { $0.id == originalSessionId }) {
+            sessions[index].supersededBySplit = nil
+            persistSessions()
+        }
+
+        let splitSessions = sessions.filter { $0.splitFromSessionId == originalSessionId }
+        for splitSession in splitSessions {
+            deleteSession(splitSession)
+        }
+
+        print("↩️ ドリル分割を元に戻しました: 元sessionId=\(originalSessionId) 削除したドリル数=\(splitSessions.count)")
+    }
+
+    /// このセッションを削除すると、分割グループの最後の1本のため元の結合セッションも
+    /// 道連れで削除されることになるか（削除前の確認UIで使う）
+    func deletingSessionWouldAlsoDeleteOriginal(_ session: TrainingSession) -> Bool {
+        guard let splitFromSessionId = session.splitFromSessionId,
+              let original = sessions.first(where: { $0.id == splitFromSessionId }),
+              original.isSupersededBySplit else { return false }
+        return !sessions.contains { $0.id != session.id && $0.splitFromSessionId == splitFromSessionId }
+    }
+
     /// GPSデータを取得
     func getGPSData(for sessionId: String) -> GPSData? {
         if let cached = gpsDataCache[sessionId] {
@@ -812,6 +841,8 @@ class SessionDataManager: ObservableObject {
 
     /// セッションを削除
     func deleteSession(_ session: TrainingSession) {
+        let shouldCascadeDeleteOriginal = deletingSessionWouldAlsoDeleteOriginal(session)
+
         sessions.removeAll { $0.id == session.id }
         gpsDataCache.removeValue(forKey: session.id)
         lruOrder.removeAll { $0 == session.id }
@@ -821,6 +852,13 @@ class SessionDataManager: ObservableObject {
         deleteAgilityData(sessionId: session.id)
 
         print("🗑️ セッション削除: \(session.name)")
+
+        // 分割グループの最後の1本だった場合、隠れて二度と復元できなくなる元セッションを
+        // 残さないよう、元セッションもまとめて削除する
+        if shouldCascadeDeleteOriginal, let splitFromSessionId = session.splitFromSessionId,
+           let original = sessions.first(where: { $0.id == splitFromSessionId }) {
+            deleteSession(original)
+        }
     }
 
     // MARK: - iCloud Backup Setting

@@ -67,7 +67,10 @@ struct TrainingSession: Identifiable, Codable {
 
     /// 分割によって置き換えられ、一覧・平均計算から除外されるべきか
     var isSupersededBySplit: Bool { supersededBySplit ?? false }
-    
+
+    // このセッションがドリル分割によって作られた場合、分割元の結合セッションのid（nil = 分割で作られたものではない）
+    var splitFromSessionId: String?
+
     enum SessionVisibility: String, Codable {
         case `public` = "public"
         case `private` = "private"
@@ -97,7 +100,8 @@ struct TrainingSession: Identifiable, Codable {
         hrIntensityRatio: Double? = nil,
         excludeFromAverage: Bool? = nil,
         pendingSplitBreaks: [DrillBreakInterval]? = nil,
-        supersededBySplit: Bool? = nil
+        supersededBySplit: Bool? = nil,
+        splitFromSessionId: String? = nil
     ) {
         self.id = id
         self.userId = userId
@@ -122,6 +126,7 @@ struct TrainingSession: Identifiable, Codable {
         self.excludeFromAverage = excludeFromAverage
         self.pendingSplitBreaks = pendingSplitBreaks
         self.supersededBySplit = supersededBySplit
+        self.splitFromSessionId = splitFromSessionId
     }
     
     /// デフォルトのセッション名（日時ベース）

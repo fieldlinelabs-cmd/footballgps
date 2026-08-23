@@ -66,6 +66,14 @@ struct SessionDetailView: View {
     // トリム（打ち切り）
     @State private var showTrimConfirm = false
     @State private var showUndoConfirm = false
+
+    // ドリル分割の復元
+    @State private var showRestoreSplitConfirm = false
+    @Environment(\.dismiss) private var dismiss
+
+    // ドリル分割の再検出
+    @State private var showSplitDetectionResult = false
+    @State private var splitDetectionFoundCount: Int? = nil
     
     init(session: TrainingSession, gpsData: GPSData) {
         self.session = session
@@ -383,6 +391,42 @@ struct SessionDetailView: View {
                 .padding(.horizontal)
             }
 
+            if displaySession.splitFromSessionId != nil {
+                HStack {
+                    Text("🔀 ドリル分割で作成されたセッションです")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                    Spacer()
+                    Button("分割前の記録に戻す") {
+                        showRestoreSplitConfirm = true
+                    }
+                    .font(.caption2)
+                }
+                .padding(.horizontal)
+            } else if displaySession.pendingSplitBreaks == nil && !displaySession.isSupersededBySplit {
+                // 分割で作られたセッションでもなく、分割候補が未検出（=元に戻した直後や、
+                // 過去に検出できなかった記録）の場合、手動で再検出できるようにする
+                HStack {
+                    Text("休憩を自動検知してドリルに分割できます")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("ドリル分割を検出する") {
+                        dataManager.analyzeForDrillSplits(sessionId: displaySession.id)
+                        let updated = dataManager.sessions.first(where: { $0.id == displaySession.id })
+                        if let breaks = updated?.pendingSplitBreaks, !breaks.isEmpty {
+                            let ranges = DrillSplitDetector.segmentRanges(totalDuration: displaySession.duration, breaks: breaks)
+                            splitDetectionFoundCount = ranges.count
+                        } else {
+                            splitDetectionFoundCount = nil
+                        }
+                        showSplitDetectionResult = true
+                    }
+                    .font(.caption2)
+                }
+                .padding(.horizontal)
+            }
+
             fieldControlsRow
         }
         .confirmationDialog(
@@ -412,6 +456,33 @@ struct SessionDetailView: View {
                 Task { await applyTrim(offset: nil) }
             }
             Button("キャンセル", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "分割前の1本の記録に戻しますか？",
+            isPresented: $showRestoreSplitConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("元に戻す", role: .destructive) {
+                if let originalId = displaySession.splitFromSessionId {
+                    dataManager.restoreSplit(originalSessionId: originalId)
+                }
+                dismiss()
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("このドリルを含む、分割後のセッションはすべて削除されます。")
+        }
+        .alert(
+            splitDetectionFoundCount != nil ? "ドリル分割の候補を検出しました" : "分割候補は見つかりませんでした",
+            isPresented: $showSplitDetectionResult
+        ) {
+            Button("OK") {}
+        } message: {
+            if let count = splitDetectionFoundCount {
+                Text("\(count)本のドリルを検出しました。セッション一覧のバッジから確認してください。")
+            } else {
+                Text("フィールド外での休憩が検出できなかったか、各ドリルが短すぎた可能性があります。")
+            }
         }
         .onAppear {
             isPlaying = false
