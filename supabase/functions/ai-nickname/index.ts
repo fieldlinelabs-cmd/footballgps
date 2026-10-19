@@ -6,6 +6,7 @@
 import { createAdminClient, resolveUser } from "../_shared/supabaseClients.ts";
 import { NICKNAME_SYSTEM_INSTRUCTION, NICKNAME_RESPONSE_SCHEMA } from "../_shared/nicknamePrompt.ts";
 import { checkGlobalDailyAllowance, getFailOpenDailyLimit } from "../_shared/geminiRateLimit.ts";
+import { extractUsage, thinkingConfig, type GeminiUsage } from "../_shared/geminiUsage.ts";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -85,6 +86,7 @@ Deno.serve(async (req) => {
     ticket_id: ticketId,
     nickname: geminiResult.data.nickname,
     reason: geminiResult.data.reason,
+    ...geminiResult.usage,
   });
   if (insertError) {
     console.error("ai-nickname: failed to save result", insertError);
@@ -163,7 +165,9 @@ async function checkFailOpenAllowance(admin: AdminClient, userId: string): Promi
 
 async function callGemini(
   sessionSummary: string
-): Promise<{ ok: true; data: GeminiResult } | { ok: false; error: string; status: number }> {
+): Promise<
+  { ok: true; data: GeminiResult; usage: GeminiUsage } | { ok: false; error: string; status: number }
+> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) {
     console.error("ai-nickname: GEMINI_API_KEY is not set");
@@ -187,6 +191,7 @@ async function callGemini(
           temperature: 0.9,
           responseMimeType: "application/json",
           responseSchema: NICKNAME_RESPONSE_SCHEMA,
+          thinkingConfig: thinkingConfig(),
         },
       }),
     });
@@ -223,7 +228,7 @@ async function callGemini(
     if (typeof parsed.nickname !== "string" || typeof parsed.reason !== "string") {
       throw new Error("missing or invalid fields in Gemini JSON response");
     }
-    return { ok: true, data: parsed };
+    return { ok: true, data: parsed, usage: extractUsage(payload) };
   } catch (e) {
     console.error("ai-nickname: failed to parse Gemini JSON", e, text);
     return { ok: false, error: "gemini_parse_error", status: 502 };

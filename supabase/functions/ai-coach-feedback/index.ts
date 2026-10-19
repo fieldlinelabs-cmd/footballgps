@@ -5,6 +5,7 @@
 import { createAdminClient, resolveUser } from "../_shared/supabaseClients.ts";
 import { SYSTEM_INSTRUCTION, RESPONSE_SCHEMA } from "../_shared/prompt.ts";
 import { checkGlobalDailyAllowance, getFailOpenDailyLimit } from "../_shared/geminiRateLimit.ts";
+import { extractUsage, thinkingConfig, type GeminiUsage } from "../_shared/geminiUsage.ts";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -102,6 +103,7 @@ Deno.serve(async (req) => {
     improvement: geminiResult.data.improvement,
     summary: geminiResult.data.summary,
     persona_recognized: geminiResult.data.personaRecognized,
+    ...geminiResult.usage,
   });
   if (insertError) {
     console.error("ai-coach-feedback: failed to save result", insertError);
@@ -182,7 +184,9 @@ async function callGemini(
   persona: string,
   position: string | null,
   sessionSummary: string
-): Promise<{ ok: true; data: GeminiResult } | { ok: false; error: string; status: number }> {
+): Promise<
+  { ok: true; data: GeminiResult; usage: GeminiUsage } | { ok: false; error: string; status: number }
+> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) {
     console.error("ai-coach-feedback: GEMINI_API_KEY is not set");
@@ -209,6 +213,7 @@ async function callGemini(
           temperature: 0.8,
           responseMimeType: "application/json",
           responseSchema: RESPONSE_SCHEMA,
+          thinkingConfig: thinkingConfig(),
         },
       }),
     });
@@ -250,7 +255,7 @@ async function callGemini(
     ) {
       throw new Error("missing or invalid fields in Gemini JSON response");
     }
-    return { ok: true, data: parsed };
+    return { ok: true, data: parsed, usage: extractUsage(payload) };
   } catch (e) {
     console.error("ai-coach-feedback: failed to parse Gemini JSON", e, text);
     return { ok: false, error: "gemini_parse_error", status: 502 };
