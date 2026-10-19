@@ -746,6 +746,11 @@ class SessionDataManager: ObservableObject {
             let points = SessionDataManager.slicedPoints(rawGPS.points, from: range.start, to: range.end)
             guard let stats = SessionDataManager.computeSegmentStats(points: points) else { continue }
 
+            // 「セッション終了時点の心拍数」の定義に合わせ、このドリル区間内で心拍データが
+            // 入っている最後の点の値を使う（消費カロリーはセッション全体の累計値でしか記録されておらず、
+            // ドリルごとに正確な値を算出できないため、意図的に設定しない）
+            let segmentHeartRate = points.last(where: { $0.heartRate != nil })?.heartRate
+
             let newSession = TrainingSession(
                 userId: original.userId,
                 teamId: original.teamId,
@@ -758,6 +763,7 @@ class SessionDataManager: ObservableObject {
                 maxSpeed: stats.maxSpeed,
                 avgSpeed: stats.avgSpeed,
                 isFlipped: original.isFlipped,
+                heartRate: segmentHeartRate,
                 staminaDrop: stats.staminaDrop,
                 hrIntensityRatio: stats.hrIntensityRatio,
                 splitFromSessionId: original.id
