@@ -2,6 +2,13 @@
 granpa11
 granpa11.pub
 
+# App Store Connect API keys (must never be committed)
+*.p8
+private_keys/
+
+# Archive/export build artifacts
+/build/
+
 # Gemini / AI generated temp files
 docs/gemini-code-*.txt
 
