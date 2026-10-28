@@ -24,13 +24,10 @@ struct FieldEditorView: View {
     @State private var fieldCorners: Field.FieldCorners?  // 直角補正済みの4隅
     @State private var showingMapSetup = false
     
-    // 4隅から縦・横を計算
+    // 4隅から縦（タッチライン）・横（ゴールライン）を計算
     private var calculatedDimensions: Field.FieldDimensions? {
         guard let c = fieldCorners, c.topLeft.latitude != 0 else { return nil }
-        let tl = CLLocation(latitude: c.topLeft.latitude, longitude: c.topLeft.longitude)
-        let tr = CLLocation(latitude: c.topRight.latitude, longitude: c.topRight.longitude)
-        let bl = CLLocation(latitude: c.bottomLeft.latitude, longitude: c.bottomLeft.longitude)
-        return Field.FieldDimensions(length: tl.distance(from: tr), width: tl.distance(from: bl))
+        return Field.FieldDimensions(length: c.touchLineLength, width: c.goalLineLength)
     }
     
     var body: some View {

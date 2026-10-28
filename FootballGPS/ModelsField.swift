@@ -27,6 +27,47 @@ struct Field: Identifiable, Codable {
         var topRight: Coordinate
         var bottomRight: Coordinate
         var bottomLeft: Coordinate
+
+        // 4隅の言葉どおりに表示する（docs/フィールド表示向き仕様書.md）:
+        // 「左上と右上」「左下と右下」を結ぶ線がゴールライン、「左上と左下」「右上と右下」がタッチライン
+
+        /// 4隅の左右が逆になっているか（登録画面で見た配置の鏡像になっていて、言葉どおりに描けない）。
+        /// 北を上・東を右とした平面で、左上→左下の方向が左上→右上の方向から時計回りなら正しい
+        var isMirrored: Bool {
+            guard topLeft.latitude != 0 else { return false }
+            let metersPerLat = 110540.0
+            let metersPerLon = 111320.0 * cos(topLeft.latitude * .pi / 180.0)
+            let abX = (topRight.longitude - topLeft.longitude) * metersPerLon
+            let abY = (topRight.latitude - topLeft.latitude) * metersPerLat
+            let adX = (bottomLeft.longitude - topLeft.longitude) * metersPerLon
+            let adY = (bottomLeft.latitude - topLeft.latitude) * metersPerLat
+            // 外積が正 = 左上→左下が左上→右上から反時計回り
+            return abX * adY - abY * adX > 0
+        }
+
+        /// ゴールラインの長さ（左上〜右上、メートル）
+        var goalLineLength: Double { Field.distance(topLeft, topRight) }
+
+        /// タッチラインの長さ（左上〜左下、メートル）
+        var touchLineLength: Double { Field.distance(topLeft, bottomLeft) }
+
+        /// ゴールラインの方がタッチラインより長いか。
+        /// 縦横比が `squareTolerance` 未満の正方形に近い場合は、タップ位置のわずかなずれで
+        /// 登録できなくなるのを防ぐため false とする
+        var isGoalLineLonger: Bool {
+            let goal = goalLineLength
+            let touch = touchLineLength
+            guard goal > touch, touch > 0 else { return false }
+            return goal / touch >= Field.squareTolerance
+        }
+    }
+
+    /// これ未満の縦横比は正方形に近いとみなし、ゴールラインとタッチラインの長さを比べない
+    static let squareTolerance = 1.1
+
+    static func distance(_ a: Coordinate, _ b: Coordinate) -> Double {
+        CLLocation(latitude: a.latitude, longitude: a.longitude)
+            .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
     }
     
     struct Coordinate: Codable {
@@ -49,8 +90,8 @@ struct Field: Identifiable, Codable {
     }
     
     struct FieldDimensions: Codable {
-        var length: Double // 縦（メートル）
-        var width: Double // 横（メートル）
+        var length: Double // 縦＝タッチラインの長さ（メートル）
+        var width: Double // 横＝ゴールラインの長さ（メートル）
         
         static let standard = FieldDimensions(length: 105, width: 68)
     }
@@ -73,92 +114,19 @@ struct Field: Identifiable, Codable {
         self.dimensions = dimensions
     }
     
-    /// 簡易イニシャライザ: 対角2点（左上・右下）と幅から、方位に依存しない長方形を作成
-    /// - Parameters:
-    ///   - topLeft: 画面表示時の左上コーナー
-    ///   - bottomRight: 画面表示時の右下コーナー（対角）
-    ///   - dimensions: フィールドサイズ（width = 幅、length は対角線と幅から自動計算）
-    init(
-        id: String = UUID().uuidString,
-        teamId: String,
-        name: String,
-        createdBy: String,
-        createdAt: Date = Date(),
-        topLeft: Coordinate,
-        bottomRight: Coordinate,
-        dimensions: FieldDimensions = .standard
-    ) {
-        self.id = id
-        self.teamId = teamId
-        self.name = name
-        self.createdBy = createdBy
-        self.createdAt = createdAt
-        
-        // フラットアース近似でメートル変換
-        let metersPerLat = 110540.0
-        let metersPerLon = 111320.0 * cos(topLeft.latitude * .pi / 180.0)
-        
-        // 対角ベクトル（メートル単位）
-        let ax = (bottomRight.longitude - topLeft.longitude) * metersPerLon
-        let ay = (bottomRight.latitude - topLeft.latitude) * metersPerLat
-        let diagLen2 = ax * ax + ay * ay
-        
-        let W = dimensions.width
-        let L = sqrt(max(0.0, diagLen2 - W * W))
-        
-        // 対角線長²= L² + W²
-        // AC = L * long_hat + W * wide_hat の連立方程式を解いてlong_hatを求める
-        // lx = (L*ax - W*ay) / (L²+W²)
-        // ly = (W*ax + L*ay) / (L²+W²)
-        // wide_hat = long_hat を時計回り90度回転 = (ly, -lx)
-        if diagLen2 > 1e-10 && L > 0 {
-            let lx = (L * ax - W * ay) / diagLen2
-            let ly = (W * ax + L * ay) / diagLen2
-            // wide_hat（上→下方向）= 時計回り90度
-            let wx = ly
-            let wy = -lx
-            
-            let midLat = (topLeft.latitude + bottomRight.latitude) / 2
-            let midLon = (topLeft.longitude + bottomRight.longitude) / 2
-            
-            // topRight = M + (L/2)*long_hat - (W/2)*wide_hat
-            let topRightLat = midLat + (L / 2) * ly / metersPerLat - (W / 2) * wy / metersPerLat
-            let topRightLon = midLon + (L / 2) * lx / metersPerLon - (W / 2) * wx / metersPerLon
-            // bottomLeft = M - (L/2)*long_hat + (W/2)*wide_hat
-            let bottomLeftLat = midLat - (L / 2) * ly / metersPerLat + (W / 2) * wy / metersPerLat
-            let bottomLeftLon = midLon - (L / 2) * lx / metersPerLon + (W / 2) * wx / metersPerLon
-            
-            self.corners = FieldCorners(
-                topLeft: topLeft,
-                topRight: Coordinate(latitude: topRightLat, longitude: topRightLon),
-                bottomRight: bottomRight,
-                bottomLeft: Coordinate(latitude: bottomLeftLat, longitude: bottomLeftLon)
-            )
-            self.dimensions = FieldDimensions(length: L, width: W)
-        } else {
-            // フォールバック（2点が同じ、または対角 < 幅）
-            self.corners = FieldCorners(
-                topLeft: topLeft,
-                topRight: topLeft,
-                bottomRight: bottomRight,
-                bottomLeft: bottomRight
-            )
-            self.dimensions = dimensions
-        }
-    }
-    
-    /// GPS座標をフィールド座標（x: 0〜width, y: 0〜length）に変換
-    /// 方位に依存しない2Dベクトル計算を使用
+    /// GPS座標をフィールド座標（x: 0〜width, y: 0〜length）に変換する。
+    /// 原点は左下、x は左下→右下（画面の右）、y は左下→左上（画面の上）。
+    /// 登録画面で設定した4隅の位置関係のまま描画するための座標（方位に依存しない2Dベクトル計算）
     func convertToFieldCoordinate(_ gpsCoordinate: CLLocationCoordinate2D) -> CGPoint? {
         guard corners.topLeft.latitude != 0 else { return nil }
         
-        let A = corners.topLeft.clLocationCoordinate   // cornerA（長辺の一端）
-        let B = corners.topRight.clLocationCoordinate  // cornerB（長辺の他端）
-        let D = corners.bottomLeft.clLocationCoordinate // cornerD（Aから幅方向）
+        let O = corners.bottomLeft.clLocationCoordinate   // 原点（左下）
+        let X = corners.bottomRight.clLocationCoordinate  // x 方向（下側のゴールライン）
+        let Y = corners.topLeft.clLocationCoordinate      // y 方向（左のタッチライン）
         
         // フラットアース近似：緯度経度をメートル単位のベクトルに変換
         let metersPerLat = 110540.0
-        let metersPerLon = 111320.0 * cos(A.latitude * .pi / 180.0)
+        let metersPerLon = 111320.0 * cos(O.latitude * .pi / 180.0)
         
         typealias Vec2 = (x: Double, y: Double)
         func vec(_ from: CLLocationCoordinate2D, _ to: CLLocationCoordinate2D) -> Vec2 {
@@ -169,24 +137,18 @@ struct Field: Identifiable, Codable {
         }
         func cross(_ a: Vec2, _ b: Vec2) -> Double { a.x * b.y - a.y * b.x }
         
-        let ab = vec(A, B)  // 長辺方向ベクトル
-        let ad = vec(A, D)  // 幅方向ベクトル
-        let ap = vec(A, gpsCoordinate)
+        let ox = vec(O, X)
+        let oy = vec(O, Y)
+        let op = vec(O, gpsCoordinate)
         
-        // P = A + u*AB + v*AD を解く（平行四辺形座標）
-        // u = (AP × AD) / (AB × AD)
-        // v = (AB × AP) / (AB × AD)
-        let denom = cross(ab, ad)
+        // P = O + a*OX + b*OY を解く（平行四辺形座標）
+        let denom = cross(ox, oy)
         guard abs(denom) > 1e-10 else { return nil }
         
-        let u = cross(ap, ad) / denom  // 長辺方向の比率（0〜1）
-        let v = cross(ab, ap) / denom  // 幅方向の比率（0〜1）
+        let a = cross(op, oy) / denom  // ゴールライン方向の比率（0〜1）
+        let b = cross(ox, op) / denom  // タッチライン方向の比率（0〜1）
         
-        // フィールド座標: y = 長辺方向、x = 幅方向
-        let fieldY = u * dimensions.length
-        let fieldX = v * dimensions.width
-        
-        return CGPoint(x: fieldX, y: fieldY)
+        return CGPoint(x: a * dimensions.width, y: b * dimensions.length)
     }
     
     /// GPS座標がこのフィールド内にあるか判定（点が多角形内にあるか）
@@ -285,13 +247,13 @@ struct Field: Identifiable, Codable {
         let cx = (p0.x + p1.x + p2.x + p3.x) / 4
         let cy = (p0.y + p1.y + p2.y + p3.y) / 4
         
-        // 長辺方向 u：TL→TR と BL→BR の平均方向
+        // ゴールライン方向 u：TL→TR と BL→BR の平均方向
         let u = normalize((
             x: (p1.x - p0.x) + (p2.x - p3.x),
             y: (p1.y - p0.y) + (p2.y - p3.y)
         ))
         
-        // 短辺方向 v：u と直交し、TL→BL 方向に合わせる
+        // タッチライン方向 v：u と直交し、TL→BL 方向に合わせる
         let vTest: V2 = ((p3.x - p0.x) + (p2.x - p1.x), (p3.y - p0.y) + (p2.y - p1.y))
         let vOpt: V2 = (-u.y, u.x)  // u を +90度回転
         let v: V2 = dot(vTest, vOpt) >= 0 ? vOpt : (u.y, -u.x)
@@ -302,9 +264,9 @@ struct Field: Identifiable, Codable {
         let r2: V2 = (p2.x - cx, p2.y - cy)
         let r3: V2 = (p3.x - cx, p3.y - cy)
         
-        // 半長さ：TL=-halfL, TR=+halfL, BR=+halfL, BL=-halfL
+        // ゴールラインの半分：TL=-halfL, TR=+halfL, BR=+halfL, BL=-halfL
         let halfL = (dot(r1, u) + dot(r2, u) - dot(r0, u) - dot(r3, u)) / 4
-        // 半幅：TL=-halfW, TR=-halfW, BR=+halfW, BL=+halfW（v は上→下）
+        // タッチラインの半分：TL=-halfW, TR=-halfW, BR=+halfW, BL=+halfW（v は上→下）
         let halfW = (dot(r2, v) + dot(r3, v) - dot(r0, v) - dot(r1, v)) / 4
         
         guard halfL > 0, halfW > 0 else {
@@ -319,22 +281,14 @@ struct Field: Identifiable, Codable {
             ))
         }
         
-        if halfL < halfW {
-            // TL/TR がゴールライン上に置かれた場合：TR と BL を入れ替えて長辺を保証
-            return FieldCorners(
-                topLeft:     corner(us: -1, vs: -1),
-                topRight:    corner(us: -1, vs: +1),
-                bottomRight: corner(us: +1, vs: +1),
-                bottomLeft:  corner(us: +1, vs: -1)
-            )
-        } else {
-            return FieldCorners(
-                topLeft:     corner(us: -1, vs: -1),
-                topRight:    corner(us: +1, vs: -1),
-                bottomRight: corner(us: +1, vs: +1),
-                bottomLeft:  corner(us: -1, vs: +1)
-            )
-        }
+        // 4隅の言葉を保ったまま配置する。長い辺の判定による付け替えや、左右が逆のときの自動修正はしない
+        // （ゴールラインの方が長い・左右が逆の登録は、登録画面で完了させない）
+        return FieldCorners(
+            topLeft:     corner(us: -1, vs: -1),
+            topRight:    corner(us: +1, vs: -1),
+            bottomRight: corner(us: +1, vs: +1),
+            bottomLeft:  corner(us: -1, vs: +1)
+        )
     }
     
     /// Firestoreとの変換用

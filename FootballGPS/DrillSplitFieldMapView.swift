@@ -101,11 +101,9 @@ struct DrillSplitFieldMapView: View {
         }
     }
 
-    /// 長辺が縦に表示されるよう fieldRatio を自動計算
+    /// 描画枠の縦横比（横＝ゴールライン、縦＝タッチライン。登録画面で設定した4隅の位置関係のまま描く）
     private func autoFieldRatio(_ dimensions: Field.FieldDimensions) -> CGFloat {
-        let longer = max(dimensions.length, dimensions.width)
-        let shorter = min(dimensions.length, dimensions.width)
-        return shorter / longer
+        dimensions.width / dimensions.length
     }
 
     private func fieldDrawSize(in size: CGSize) -> (CGFloat, CGFloat) {

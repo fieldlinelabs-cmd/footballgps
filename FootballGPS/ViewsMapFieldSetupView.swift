@@ -144,16 +144,36 @@ struct MapFieldSetupView: View {
                                 .background(.ultraThinMaterial)
                                 .cornerRadius(8)
                         }
-                        
-                        // 4隅が揃ったら補正プレビューを案内
+
+                        // 4隅の言葉どおりに表示されること・ゴールラインの指定を常に案内する
+                        // （docs/フィールド表示向き仕様書.md §5.1）
+                        Text("設定した位置関係のまま画面に表示されます。\(Self.goalLineGuide)地図は2本指で回転できます。")
+                            .font(.caption)
+                            .padding(.horizontal)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(8)
+
+                        // 4隅が揃ったら補正プレビューを案内（言葉どおりに描けない登録なら理由を表示）
                         if allCornersSet {
-                            Text("青枠：直角補正後のフィールド")
-                                .font(.caption)
-                                .foregroundStyle(.blue)
-                                .padding(.horizontal)
-                                .padding(.vertical, 6)
-                                .background(.ultraThinMaterial)
-                                .cornerRadius(8)
+                            if let message = cornerValidationMessage {
+                                Text(message)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.red)
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 6)
+                                    .background(.ultraThinMaterial)
+                                    .cornerRadius(8)
+                            } else {
+                                Text("青枠：直角補正後のフィールド")
+                                    .font(.caption)
+                                    .foregroundStyle(.blue)
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 6)
+                                    .background(.ultraThinMaterial)
+                                    .cornerRadius(8)
+                            }
                         }
                         
                         // 4隅選択ボタン
@@ -218,7 +238,7 @@ struct MapFieldSetupView: View {
                     Button("完了") {
                         saveCorners()
                     }
-                    .disabled(!allCornersSet)
+                    .disabled(!allCornersSet || cornerValidationMessage != nil)
                 }
             }
             .onAppear {
@@ -258,32 +278,54 @@ struct MapFieldSetupView: View {
     private var annotations: [MapAnnotation] {
         var items: [MapAnnotation] = []
         
+        // 印に「左上」などの名前を出し、どの角をどこに置いたか分かるようにする（id は名前で、色の判定にも使う）
         if let coord = topLeft {
-            items.append(MapAnnotation(id: "topLeft", coordinate: coord, color: .green))
+            items.append(MapAnnotation(id: CornerType.topLeft.rawValue, coordinate: coord, color: .green))
         }
         if let coord = topRight {
-            items.append(MapAnnotation(id: "topRight", coordinate: coord, color: .blue))
+            items.append(MapAnnotation(id: CornerType.topRight.rawValue, coordinate: coord, color: .blue))
         }
         if let coord = bottomRight {
-            items.append(MapAnnotation(id: "bottomRight", coordinate: coord, color: .red))
+            items.append(MapAnnotation(id: CornerType.bottomRight.rawValue, coordinate: coord, color: .red))
         }
         if let coord = bottomLeft {
-            items.append(MapAnnotation(id: "bottomLeft", coordinate: coord, color: .orange))
+            items.append(MapAnnotation(id: CornerType.bottomLeft.rawValue, coordinate: coord, color: .orange))
         }
         
         return items
     }
-    
-    /// 4隅が揃っていれば直角補正済みのフィールド境界ポリゴンを返す
-    private var fieldPolygonCoordinates: [CLLocationCoordinate2D] {
+
+    /// ゴールラインの指定方法の案内文（常時の案内と、登録できないときのメッセージで共有する）
+    static let goalLineGuide = "「左上と右上」「左下と右下」を結ぶ線が、それぞれゴールラインになるように設定してください。"
+
+    /// 4隅が揃っていれば直角補正済みの4隅を返す
+    private var correctedCorners: Field.FieldCorners? {
         guard let tl = topLeft, let tr = topRight,
-              let br = bottomRight, let bl = bottomLeft else { return [] }
-        let corrected = Field.correctToRectangle(
+              let br = bottomRight, let bl = bottomLeft else { return nil }
+        return Field.correctToRectangle(
             topLeft:     Field.Coordinate(from: tl),
             topRight:    Field.Coordinate(from: tr),
             bottomRight: Field.Coordinate(from: br),
             bottomLeft:  Field.Coordinate(from: bl)
         )
+    }
+
+    /// 4隅の言葉どおりに描けない登録なら、その理由（完了できない）。問題なければ nil
+    private var cornerValidationMessage: String? {
+        guard let corrected = correctedCorners else { return nil }
+        if corrected.isMirrored {
+            return "左と右が逆になっています。\(Self.goalLineGuide)"
+        }
+        if corrected.isGoalLineLonger {
+            return Self.goalLineGuide
+        }
+        return nil
+    }
+    
+    /// 4隅が揃っていれば直角補正済みのフィールド境界ポリゴンを返す
+    /// （言葉どおりに描けない登録でも、どこが問題か目で確認できるよう表示する）
+    private var fieldPolygonCoordinates: [CLLocationCoordinate2D] {
+        guard let corrected = correctedCorners else { return [] }
         return [
             corrected.topLeft.clLocationCoordinate,
             corrected.topRight.clLocationCoordinate,
@@ -352,17 +394,9 @@ struct MapFieldSetupView: View {
     }
     
     private func saveCorners() {
-        guard let tl = topLeft, let tr = topRight, let br = bottomRight, let bl = bottomLeft else {
-            return
-        }
-        
-        // 直角に補正して保存
-        corners = Field.correctToRectangle(
-            topLeft:     Field.Coordinate(from: tl),
-            topRight:    Field.Coordinate(from: tr),
-            bottomRight: Field.Coordinate(from: br),
-            bottomLeft:  Field.Coordinate(from: bl)
-        )
+        // 直角に補正して保存（言葉どおりに描けない登録は保存しない）
+        guard let corrected = correctedCorners, cornerValidationMessage == nil else { return }
+        corners = corrected
         
         dismiss()
     }
@@ -526,13 +560,13 @@ struct MapViewRepresentable: UIViewRepresentable {
             // 色を設定
             if let title = annotation.title, let titleString = title {
                 switch titleString {
-                case "topLeft":
+                case MapFieldSetupView.CornerType.topLeft.rawValue:
                     annotationView?.markerTintColor = .systemGreen
-                case "topRight":
+                case MapFieldSetupView.CornerType.topRight.rawValue:
                     annotationView?.markerTintColor = .systemBlue
-                case "bottomRight":
+                case MapFieldSetupView.CornerType.bottomRight.rawValue:
                     annotationView?.markerTintColor = .systemRed
-                case "bottomLeft":
+                case MapFieldSetupView.CornerType.bottomLeft.rawValue:
                     annotationView?.markerTintColor = .systemOrange
                 default:
                     annotationView?.markerTintColor = .systemPurple

@@ -261,12 +261,10 @@ private struct ThirdLinesOverlay: View {
 
 // MARK: - Field Ratio Helper
 
-/// 長辺が縦に表示されるよう fieldRatio を自動計算
+/// 描画枠の縦横比（横＝ゴールライン、縦＝タッチライン。登録画面で設定した4隅の位置関係のまま描く）
 /// fieldRatio < 1 → drawHeight > drawWidth（縦長）
 fileprivate func autoFieldRatio(_ dimensions: Field.FieldDimensions) -> CGFloat {
-    let longer  = max(dimensions.length, dimensions.width)
-    let shorter = min(dimensions.length, dimensions.width)
-    return shorter / longer
+    dimensions.width / dimensions.length
 }
 
 // MARK: - Helper Extensions

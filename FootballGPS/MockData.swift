@@ -106,10 +106,11 @@ struct MockData {
         name: "〇〇グラウンド",
         createdBy: "user1",
         corners: Field.FieldCorners(
-            topLeft: Field.Coordinate(latitude: 35.6816, longitude: 139.7665),
-            topRight: Field.Coordinate(latitude: 35.6816, longitude: 139.7677),
-            bottomRight: Field.Coordinate(latitude: 35.6808, longitude: 139.7677),
-            bottomLeft: Field.Coordinate(latitude: 35.6808, longitude: 139.7665)
+            // 南北105m（タッチライン）× 東西68m（ゴールライン）
+            topLeft: Field.Coordinate(latitude: 35.68175, longitude: 139.76650),
+            topRight: Field.Coordinate(latitude: 35.68175, longitude: 139.76725),
+            bottomRight: Field.Coordinate(latitude: 35.68080, longitude: 139.76725),
+            bottomLeft: Field.Coordinate(latitude: 35.68080, longitude: 139.76650)
         ),
         dimensions: Field.FieldDimensions(length: 105, width: 68)
     )
