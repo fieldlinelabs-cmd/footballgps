@@ -11,6 +11,7 @@ import Combine
 struct SessionsListView: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
     @ObservedObject private var connectivityService = PhoneWatchConnectivityService.shared
+    @ObservedObject private var nativeAdManager = NativeAdManager.shared
     @State private var splitReviewSession: TrainingSession?
     @State private var pendingCascadeDeletion: TrainingSession?
 
@@ -79,10 +80,14 @@ struct SessionsListView: View {
     }
     
     private var sessionsList: some View {
-        List {
-            ForEach(groupedSessions.keys.sorted(by: >), id: \.self) { date in
+        let grouped = groupedSessions
+        let dates = grouped.keys.sorted(by: >)
+        let adSlots = Self.nativeAdSlots(dates: dates, grouped: grouped)
+
+        return List {
+            ForEach(dates, id: \.self) { date in
                 Section {
-                    ForEach(groupedSessions[date] ?? []) { session in
+                    ForEach(grouped[date] ?? []) { session in
                         NavigationLink {
                             sessionDetailView(for: session)
                         } label: {
@@ -129,8 +134,18 @@ struct SessionsListView: View {
                 } header: {
                     Text(formatSectionDate(date))
                 }
+
+                // ネイティブ広告（広告仕様書§4.1①）。読み込めていない位置には何も出さない
+                if let slot = adSlots[date], slot < nativeAdManager.ads.count {
+                    Section {
+                        NativeAdCardView(nativeAd: nativeAdManager.ads[slot])
+                            .frame(height: 64)
+                    }
+                }
             }
         }
+        .onAppear { nativeAdManager.loadIfNeeded(slotCount: adSlots.count) }
+        .onChange(of: adSlots.count) { _, count in nativeAdManager.loadIfNeeded(slotCount: count) }
         .refreshable {
             // Pull to Refreshでデータを再読み込み
             await refreshData()
@@ -150,6 +165,23 @@ struct SessionsListView: View {
         }
     }
     
+    /// ネイティブ広告を挟む位置（広告仕様書§4.1①）。日付のまとまりの途中には入れず、
+    /// 上から3件目を含むまとまりの後に1枚、以降は前の広告から10件以上進んだまとまりの後に1枚ずつ。
+    /// 戻り値は「この日付のまとまりの後に何番目の広告を出すか」
+    private static func nativeAdSlots(dates: [Date], grouped: [Date: [TrainingSession]]) -> [Date: Int] {
+        var slots: [Date: Int] = [:]
+        var sessionCount = 0
+        var nextThreshold = 3
+        for date in dates {
+            sessionCount += grouped[date]?.count ?? 0
+            if sessionCount >= nextThreshold {
+                slots[date] = slots.count
+                nextThreshold = sessionCount + 10
+            }
+        }
+        return slots
+    }
+
     // セッションを日付でグループ化
     private var groupedSessions: [Date: [TrainingSession]] {
         Dictionary(grouping: dataManager.sessions.filter { !$0.isSupersededBySplit }) { session in
