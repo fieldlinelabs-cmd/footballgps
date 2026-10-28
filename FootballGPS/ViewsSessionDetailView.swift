@@ -166,6 +166,9 @@ struct SessionDetailView: View {
         .sheet(isPresented: $showingPositionPicker) {
             PositionPickerSheet(session: displaySession)
         }
+        // 見終わった後のインタースティシャル広告（広告仕様書§4.2.1）。一覧へ戻る・別タブへ切り替えで離れたときに判定する
+        .onAppear { InterstitialAdManager.shared.detailDidAppear(sessionId: session.id) }
+        .onDisappear { InterstitialAdManager.shared.detailDidDisappear(sessionId: session.id) }
     }
 
     // MARK: - Field Change Sheet
@@ -1246,6 +1249,11 @@ struct AICoachFeedbackSection: View {
                 ticketId: ticketId,
                 from: viewController
             )
+
+            // リワード広告を見た閲覧では、戻るときのインタースティシャルを出さない（広告仕様書§4.2.1）
+            if presentResult != .noFill {
+                InterstitialAdManager.shared.markRewardedAdWatched(sessionId: session.id)
+            }
 
             switch presentResult {
             case .rewarded:
