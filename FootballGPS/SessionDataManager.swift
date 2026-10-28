@@ -591,7 +591,7 @@ class SessionDataManager: ObservableObject {
         return segments
     }
 
-    // MARK: - Trim (打ち切り)
+    // MARK: - GPS点列の区間切り出し
 
     /// 経過秒（先頭点からの秒数）に対応する points 内インデックスを二分探索で返す
     static func gpsIndex(in points: [GPSPoint], atElapsed offset: TimeInterval) -> Int {
@@ -609,18 +609,6 @@ class SessionDataManager: ObservableObject {
         return lo
     }
 
-    /// offset までの GPS 点列を返す。offset が nil、または points が空ならそのまま返す（トリムなし）
-    static func trimmedPoints(_ points: [GPSPoint], toOffset offset: TimeInterval?) -> [GPSPoint] {
-        guard let offset, !points.isEmpty else { return points }
-        return Array(points[0...gpsIndex(in: points, atElapsed: offset)])
-    }
-
-    /// トリム設定を適用した「有効な」GPSデータを返す。生ファイルは変更しない
-    func getEffectiveGPSData(for session: TrainingSession) -> GPSData? {
-        guard let full = getGPSData(for: session.id) else { return nil }
-        return GPSData(sessionId: full.sessionId, points: SessionDataManager.trimmedPoints(full.points, toOffset: session.effectiveEndOffset))
-    }
-
     /// from〜to（先頭点からの経過秒、[from, to]）の範囲でGPS点列を切り出す
     static func slicedPoints(_ points: [GPSPoint], from startOffset: TimeInterval, to endOffset: TimeInterval) -> [GPSPoint] {
         guard !points.isEmpty else { return [] }
@@ -630,7 +618,7 @@ class SessionDataManager: ObservableObject {
         return Array(points[startIndex...endIndex])
     }
 
-    /// GPS点列の部分区間から算出した全メトリクス（トリム・ドリル分割の両方で共有）
+    /// GPS点列の部分区間から算出した全メトリクス（ドリルの自動分割・手動切り出しで共有）
     struct SegmentStats {
         let duration: TimeInterval
         let totalDistance: Double
@@ -728,19 +716,28 @@ class SessionDataManager: ObservableObject {
         persistSessions()
     }
 
-    /// 検出されたドリル分割を確定する。生トレースを区間ごとに切り出し、それぞれを独立した
-    /// TrainingSession として保存・Supabaseアップロードする。元の結合セッションは削除せず
-    /// supersededBySplit フラグでソフト除外する（分割ミスがあった場合に復旧可能にするため）。
+    /// 検出されたドリル分割を確定する（自動分割の確認画面から呼ばれる）
     func confirmDrillSplit(for sessionId: String) async {
         guard let original = sessions.first(where: { $0.id == sessionId }),
-              let breaks = original.pendingSplitBreaks, !breaks.isEmpty,
-              let rawGPS = getGPSData(for: sessionId) else { return }
+              let breaks = original.pendingSplitBreaks, !breaks.isEmpty else { return }
 
         let ranges = DrillSplitDetector.segmentRanges(totalDuration: original.duration, breaks: breaks)
         guard ranges.count >= 2 else {
             dismissPendingSplit(for: sessionId)
             return
         }
+
+        await applyDrillSplit(for: sessionId, ranges: ranges)
+    }
+
+    /// ドリル区間ごとに生トレースを切り出し、それぞれを独立した TrainingSession として
+    /// 保存・Supabaseアップロードする（自動分割と手動切り出しで共通）。元の結合セッションは削除せず
+    /// supersededBySplit フラグでソフト除外する（分割ミスがあった場合に復旧可能にするため）。
+    /// 1本だけの切り出しは元の記録の範囲を直しただけなので、名前は元のままにする
+    func applyDrillSplit(for sessionId: String, ranges: [(start: TimeInterval, end: TimeInterval)]) async {
+        guard let original = sessions.first(where: { $0.id == sessionId }),
+              let rawGPS = getGPSData(for: sessionId),
+              !ranges.isEmpty else { return }
 
         for (i, range) in ranges.enumerated() {
             let points = SessionDataManager.slicedPoints(rawGPS.points, from: range.start, to: range.end)
@@ -755,7 +752,7 @@ class SessionDataManager: ObservableObject {
                 userId: original.userId,
                 teamId: original.teamId,
                 fieldId: original.fieldId,
-                name: "\(original.name) - ドリル\(i + 1)",
+                name: ranges.count == 1 ? original.name : "\(original.name) - ドリル\(i + 1)",
                 date: original.date.addingTimeInterval(range.start),
                 duration: stats.duration,
                 visibility: original.visibility,
@@ -1230,35 +1227,6 @@ class SessionDataManager: ObservableObject {
     func updateExcludeFromAverage(for sessionId: String, excluded: Bool) {
         guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
         sessions[index].excludeFromAverage = excluded
-        persistSessions()
-    }
-
-    /// 打ち切り（トリム）設定と、トリム後の点列から再計算した派生メトリクスをまとめて永続化する。
-    /// effectiveEndOffset に nil を渡すと「元に戻す」になる（トリムなし・生データ全体で再計算した値を書き戻す）
-    func applyTrim(
-        for sessionId: String,
-        effectiveEndOffset: TimeInterval?,
-        duration: TimeInterval,
-        totalDistance: Double,
-        maxSpeed: Double,
-        avgSpeed: Double,
-        sprintCount: Int,
-        agilityTurnCount: Int,
-        agilityScore: Int,
-        staminaDrop: Double?,
-        hrIntensityRatio: Double?
-    ) {
-        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
-        sessions[index].effectiveEndOffset = effectiveEndOffset
-        sessions[index].duration = duration
-        sessions[index].totalDistance = totalDistance
-        sessions[index].maxSpeed = maxSpeed
-        sessions[index].avgSpeed = avgSpeed
-        sessions[index].sprintCount = sprintCount
-        sessions[index].agilityTurnCount = agilityTurnCount
-        sessions[index].agilityScore = agilityScore
-        sessions[index].staminaDrop = staminaDrop
-        sessions[index].hrIntensityRatio = hrIntensityRatio
         persistSessions()
     }
 

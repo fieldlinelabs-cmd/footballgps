@@ -189,4 +189,63 @@ struct DrillSplitDetectorTests {
         let breaks = DrillSplitDetector.detectBreaks(points: points, field: field)
         #expect(breaks.isEmpty)
     }
+
+    // MARK: - 手動分割
+
+    @Test func 手動_区切りなしなら全体が1本() {
+        let ranges = DrillSplitDetector.manualRanges(cutOffsets: [], isDrill: [true], totalDuration: 600)
+        #expect(ranges.count == 1)
+        #expect(ranges[0].start == 0 && ranges[0].end == 600)
+    }
+
+    @Test func 手動_先頭を休憩にすると開始位置だけ変わる() {
+        let ranges = DrillSplitDetector.manualRanges(cutOffsets: [120], isDrill: [false, true], totalDuration: 600)
+        #expect(ranges.count == 1)
+        #expect(ranges[0].start == 120 && ranges[0].end == 600)
+    }
+
+    @Test func 手動_ドリル同士が隣り合っても別々の区間になる() {
+        let ranges = DrillSplitDetector.manualRanges(
+            cutOffsets: [300, 420, 900],
+            isDrill: [true, false, true, true],
+            totalDuration: 1200
+        )
+        #expect(ranges.count == 3)
+        #expect(ranges[0].start == 0 && ranges[0].end == 300)
+        #expect(ranges[1].start == 420 && ranges[1].end == 900)
+        #expect(ranges[2].start == 900 && ranges[2].end == 1200)
+    }
+
+    @Test func 手動_先頭と末尾の休憩はドリルに含まれない() {
+        let ranges = DrillSplitDetector.manualRanges(
+            cutOffsets: [60, 500, 560],
+            isDrill: [false, true, false, false],
+            totalDuration: 600
+        )
+        #expect(ranges.count == 1)
+        #expect(ranges[0].start == 60 && ranges[0].end == 500)
+    }
+
+    @Test func 手動_自動検出の区間から初期状態を作り元の区間に戻せる() {
+        // 入場前の移動(0-30)、ドリル(30-300)、休憩(300-420)、ドリル(420-900)、退場後の移動(900-1000)
+        let autoRanges: [(start: TimeInterval, end: TimeInterval)] = [(30, 300), (420, 900)]
+        let state = DrillSplitDetector.manualState(fromDrillRanges: autoRanges, totalDuration: 1000)
+        #expect(state.cutOffsets == [30, 300, 420, 900])
+        #expect(state.isDrill == [false, true, false, true, false])
+
+        let ranges = DrillSplitDetector.manualRanges(
+            cutOffsets: state.cutOffsets, isDrill: state.isDrill, totalDuration: 1000
+        )
+        #expect(ranges.count == 2)
+        #expect(ranges[0].start == 30 && ranges[0].end == 300)
+        #expect(ranges[1].start == 420 && ranges[1].end == 900)
+    }
+
+    @Test func 手動_自動検出で捨てた短い断片は前後の休憩とまとまる() {
+        // segmentRanges が捨てた 300-330 の断片は、ドリル区間の境目ではないため区切りにならない
+        let autoRanges: [(start: TimeInterval, end: TimeInterval)] = [(0, 300), (500, 800)]
+        let state = DrillSplitDetector.manualState(fromDrillRanges: autoRanges, totalDuration: 800)
+        #expect(state.cutOffsets == [300, 500])
+        #expect(state.isDrill == [true, false, true])
+    }
 }

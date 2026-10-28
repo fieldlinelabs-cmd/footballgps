@@ -63,9 +63,8 @@ struct SessionDetailView: View {
     @Environment(\.scenePhase) private var scenePhase
     private let timer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
 
-    // トリム（打ち切り）
-    @State private var showTrimConfirm = false
-    @State private var showUndoConfirm = false
+    // ドリルの手動切り出し
+    @State private var showManualSplit = false
 
     // ドリル分割の復元
     @State private var showRestoreSplitConfirm = false
@@ -110,24 +109,10 @@ struct SessionDetailView: View {
         return lo
     }
 
-    /// dataManager.sessions 内の最新値（トリム確定直後の再計算値等）を反映するセッション参照。
-    /// session（let）は識別子・トリムで変化しないフィールド用に残す。
+    /// dataManager.sessions 内の最新値（派生メトリクスの再計算値等）を反映するセッション参照。
+    /// session（let）は識別子など変化しないフィールド用に残す。
     private var displaySession: TrainingSession {
         dataManager.sessions.first(where: { $0.id == session.id }) ?? session
-    }
-
-    /// トリム設定を適用した点列（生データは変更しない）
-    private var effectivePoints: [GPSPoint] {
-        SessionDataManager.trimmedPoints(gpsData.points, toOffset: displaySession.effectiveEndOffset)
-    }
-
-    private var effectiveGPSData: GPSData {
-        GPSData(sessionId: gpsData.sessionId, points: effectivePoints)
-    }
-
-    /// 確定済みトリムの位置に対応する gpsData.points 内インデックス（未トリムなら nil）
-    private var effectiveCutoffIndex: Int? {
-        displaySession.effectiveEndOffset.map { SessionDataManager.gpsIndex(in: gpsData.points, atElapsed: $0) }
     }
 
     var body: some View {
@@ -334,8 +319,7 @@ struct SessionDetailView: View {
                 field: field,
                 isFlipped: isFlipped,
                 currentPointIndex: currentPointIndex,
-                sprintSegments: showSprints ? sprintSegments : [],
-                effectiveCutoffIndex: effectiveCutoffIndex
+                sprintSegments: showSprints ? sprintSegments : []
             )
             .frame(height: 600)
 
@@ -356,40 +340,25 @@ struct SessionDetailView: View {
                     .clipShape(Capsule())
                 }
 
-                // この位置で打ち切る
-                Button {
-                    showTrimConfirm = true
-                } label: {
-                    Label(
-                        displaySession.isTrimmed ? "この位置に変更" : "この位置で打ち切る",
-                        systemImage: "scissors"
-                    )
-                    .font(.subheadline)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.orange.opacity(0.12))
-                    .foregroundStyle(.orange)
-                    .clipShape(Capsule())
+                // ドリルを切り出す（分割で作られたセッション・分割済みの元記録は対象外）
+                if displaySession.splitFromSessionId == nil && !displaySession.isSupersededBySplit {
+                    Button {
+                        isPlaying = false
+                        showManualSplit = true
+                    } label: {
+                        Label("ドリルを切り出す", systemImage: "scissors")
+                            .font(.subheadline)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.orange.opacity(0.12))
+                            .foregroundStyle(.orange)
+                            .clipShape(Capsule())
+                    }
                 }
-                .disabled(currentPointIndex < 1)
             }
             .padding(.horizontal)
 
             playbackControlsView
-
-            if let offset = displaySession.effectiveEndOffset {
-                HStack {
-                    Text("✂️ 実質\(formatPlaybackTime(offset))で打ち切り中（生データ\(formatPlaybackTime(totalDuration))）")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                    Spacer()
-                    Button("元に戻す") {
-                        showUndoConfirm = true
-                    }
-                    .font(.caption2)
-                }
-                .padding(.horizontal)
-            }
 
             if displaySession.splitFromSessionId != nil {
                 HStack {
@@ -429,33 +398,21 @@ struct SessionDetailView: View {
 
             fieldControlsRow
         }
-        .confirmationDialog(
-            "この位置でセッションを打ち切りますか？",
-            isPresented: $showTrimConfirm,
-            titleVisibility: .visible
-        ) {
-            if SessionDataManager.computeSegmentStats(points: SessionDataManager.trimmedPoints(gpsData.points, toOffset: currentTime)) != nil {
-                Button("打ち切る") {
-                    Task { await applyTrim(offset: currentTime) }
-                }
+        .sheet(isPresented: $showManualSplit) {
+            NavigationStack {
+                DrillSplitManualEditView(
+                    session: displaySession,
+                    gpsData: gpsData,
+                    field: field,
+                    isFlipped: isFlipped,
+                    initialRanges: pendingDrillRanges,
+                    onConfirmed: {
+                        showManualSplit = false
+                        // 元のセッションは分割済みとして一覧から消えるため、詳細画面も閉じる
+                        dismiss()
+                    }
+                )
             }
-            Button("キャンセル", role: .cancel) {}
-        } message: {
-            if let preview = SessionDataManager.computeSegmentStats(points: SessionDataManager.trimmedPoints(gpsData.points, toOffset: currentTime)) {
-                Text("時間: \(formatDuration(displaySession.duration)) → \(formatDuration(preview.duration))\n距離: \(formatDistance(displaySession.totalDistance)) → \(formatDistance(preview.totalDistance))")
-            } else {
-                Text("この位置では短すぎて打ち切れません")
-            }
-        }
-        .confirmationDialog(
-            "トリムを元に戻しますか？",
-            isPresented: $showUndoConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("元に戻す", role: .destructive) {
-                Task { await applyTrim(offset: nil) }
-            }
-            Button("キャンセル", role: .cancel) {}
         }
         .confirmationDialog(
             "分割前の1本の記録に戻しますか？",
@@ -486,12 +443,12 @@ struct SessionDetailView: View {
         }
         .onAppear {
             isPlaying = false
-            currentTime = displaySession.effectiveEndOffset ?? 0
-            sprintSegments = SessionDataManager.computeSprintSegments(effectivePoints)
-            timeSeries = SessionDataManager.computeTimeSeries(gpsPoints: effectivePoints)
+            currentTime = 0
+            sprintSegments = SessionDataManager.computeSprintSegments(gpsData.points)
+            timeSeries = SessionDataManager.computeTimeSeries(gpsPoints: gpsData.points)
             if let age = UserProfileManager.shared.age {
                 hrIntensity = SessionDataManager.computeHeartRateIntensity(
-                    gpsPoints: effectivePoints, age: age
+                    gpsPoints: gpsData.points, age: age
                 )
             }
             // sprintCount は記録時点の古い閾値で保存されている場合があるため、
@@ -557,7 +514,7 @@ struct SessionDetailView: View {
             }
             if let field = currentField {
                 syncDiagnosis = SessionDataManager.computeStyleSync(
-                    gpsData: effectiveGPSData,
+                    gpsData: gpsData,
                     field: field,
                     isFlipped: isFlipped,
                     sprintCount: sprintCnt,
@@ -573,7 +530,7 @@ struct SessionDetailView: View {
             if let field = currentField {
                 let cnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
                 syncDiagnosis = SessionDataManager.computeStyleSync(
-                    gpsData: effectiveGPSData,
+                    gpsData: gpsData,
                     field: field,
                     isFlipped: flipped,
                     sprintCount: cnt,
@@ -595,78 +552,19 @@ struct SessionDetailView: View {
         }
     }
 
-    // MARK: - Trim (打ち切り)
+    // MARK: - Manual Drill Split
 
-    /// 打ち切りを確定（offset: nil で「元に戻す」）。再計算した値を1つの updatedSession にまとめてから
-    /// ローカル永続化とSupabaseアップロードの両方に使う（片方だけ古い値のまま、というズレを防ぐため）
-    private func applyTrim(offset: TimeInterval?) async {
-        let points = SessionDataManager.trimmedPoints(gpsData.points, toOffset: offset)
-        guard let result = SessionDataManager.computeSegmentStats(points: points) else { return }
-
-        currentTime = offset ?? 0
-
-        dataManager.applyTrim(
-            for: session.id,
-            effectiveEndOffset: offset,
-            duration: result.duration,
-            totalDistance: result.totalDistance,
-            maxSpeed: result.maxSpeed,
-            avgSpeed: result.avgSpeed,
-            sprintCount: result.sprintCount,
-            agilityTurnCount: result.agilityTurnCount,
-            agilityScore: result.agilityScore,
-            staminaDrop: result.staminaDrop,
-            hrIntensityRatio: result.hrIntensityRatio
-        )
-
-        var updatedSession = displaySession
-        updatedSession.effectiveEndOffset = offset
-        updatedSession.duration = result.duration
-        updatedSession.totalDistance = result.totalDistance
-        updatedSession.maxSpeed = result.maxSpeed
-        updatedSession.avgSpeed = result.avgSpeed
-        updatedSession.sprintCount = result.sprintCount
-        updatedSession.agilityTurnCount = result.agilityTurnCount
-        updatedSession.agilityScore = result.agilityScore
-        updatedSession.staminaDrop = result.staminaDrop
-        updatedSession.hrIntensityRatio = result.hrIntensityRatio
-
-        let radar = SessionDataManager.computePlayerRadar(
-            totalDistance: updatedSession.totalDistance,
-            duration: updatedSession.duration,
-            sprintCount: updatedSession.sprintCount ?? 0,
-            agilityTurnCount: updatedSession.agilityTurnCount,
-            staminaDrop: updatedSession.staminaDrop,
-            hrIntensityRatio: updatedSession.hrIntensityRatio,
-            maxSpeed: updatedSession.maxSpeed
-        )
-        do {
-            try await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
-            print("✅ トリム結果のSupabaseアップロード完了: id=\(updatedSession.id) offset=\(String(describing: offset)) duration=\(updatedSession.duration)")
-        } catch {
-            print("❌ トリム結果のSupabaseアップロードに失敗: id=\(updatedSession.id) offset=\(String(describing: offset)) error=\(error)")
-        }
-
-        sprintSegments = result.sprintSegments
-        timeSeries = result.timeSeries
-        hrIntensity = result.hrIntensity
-        if let field = currentField {
-            syncDiagnosis = SessionDataManager.computeStyleSync(
-                gpsData: GPSData(sessionId: gpsData.sessionId, points: points),
-                field: field,
-                isFlipped: isFlipped,
-                sprintCount: result.sprintCount,
-                agilityTurnCount: result.agilityTurnCount,
-                maxSpeed: result.maxSpeed
-            )
-        }
+    /// 自動検出の分割候補があれば、そのドリル区間（手動切り出し画面の初期状態に使う）
+    private var pendingDrillRanges: [(start: TimeInterval, end: TimeInterval)] {
+        guard let breaks = displaySession.pendingSplitBreaks, !breaks.isEmpty else { return [] }
+        return DrillSplitDetector.segmentRanges(totalDuration: displaySession.duration, breaks: breaks)
     }
     
     // MARK: - Heatmap View
     
     private func heatmapView(field: Field) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            FieldHeatmapView(gpsData: effectiveGPSData, field: field, isFlipped: isFlipped)
+            FieldHeatmapView(gpsData: gpsData, field: field, isFlipped: isFlipped)
                 .frame(height: 600)
             
             fieldControlsRow
@@ -829,7 +727,7 @@ struct SessionDetailView: View {
     
     private func statisticsView(field: Field) -> some View {
         let thirdRatios = SessionDataManager.computeThirdRatios(
-            gpsData: effectiveGPSData, field: field, isFlipped: isFlipped
+            gpsData: gpsData, field: field, isFlipped: isFlipped
         )
         let staminaDrop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
         let sprintCnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
@@ -942,9 +840,6 @@ struct SessionDetailView: View {
             
             VStack(spacing: 12) {
                 StatisticRow(label: "GPSポイント数（生データ）", value: "\(gpsData.points.count)点", icon: "location.fill")
-                if displaySession.isTrimmed {
-                    StatisticRow(label: "GPSポイント数（トリム後）", value: "\(effectivePoints.count)点", icon: "scissors")
-                }
                 StatisticRow(label: "フィールド", value: field.name, icon: "map")
                 StatisticRow(label: "フィールドサイズ", value: "\(Int(field.dimensions.length))m × \(Int(field.dimensions.width))m", icon: "ruler")
                 

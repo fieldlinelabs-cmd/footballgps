@@ -52,12 +52,6 @@ struct TrainingSession: Identifiable, Codable {
     /// 自己平均から除外されるか（手動 or 5分未満）
     var isExcludedFromAverage: Bool { excludeFromAverage ?? false }
 
-    // トリム（打ち切り）設定: 先頭GPS点からの経過秒。nil = トリムなし（生データ全体を使用、旧データとの後方互換用）
-    var effectiveEndOffset: TimeInterval?
-
-    /// トリムが適用されているか
-    var isTrimmed: Bool { effectiveEndOffset != nil }
-
     // ドリル自動分割: 自動検出された未確認の休憩区間（nil = 未解析 or 解析対象外 or 解決済み）
     var pendingSplitBreaks: [DrillBreakInterval]?
     // ↑ DrillBreakInterval はこのファイル下部で定義（Watchアプリターゲットとも共有するため）

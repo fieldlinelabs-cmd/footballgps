@@ -132,4 +132,45 @@ enum DrillSplitDetector {
         }
         return ranges
     }
+
+    // MARK: - 手動分割（docs/手動ドリル分割仕様書.md）
+
+    /// 区切り位置で全体を隙間なく分けた区間を返す。
+    /// cutOffsets は先頭点からの経過秒（昇順、0 と totalDuration は含まない）
+    static func segments(
+        cutOffsets: [TimeInterval],
+        totalDuration: TimeInterval
+    ) -> [(start: TimeInterval, end: TimeInterval)] {
+        let bounds = [0] + cutOffsets + [totalDuration]
+        return zip(bounds, bounds.dropFirst()).map { (start: $0, end: $1) }
+    }
+
+    /// 手動分割の編集結果から、ドリルとして切り出す区間を返す。
+    /// isDrill は区間ごとのドリル/休憩（要素数 = cutOffsets.count + 1）。
+    /// ドリル同士が隣り合う場合も別々の区間として返す（休憩区間のリストでは表せないため）
+    static func manualRanges(
+        cutOffsets: [TimeInterval],
+        isDrill: [Bool],
+        totalDuration: TimeInterval
+    ) -> [(start: TimeInterval, end: TimeInterval)] {
+        zip(segments(cutOffsets: cutOffsets, totalDuration: totalDuration), isDrill)
+            .filter { $0.1 }
+            .map { $0.0 }
+    }
+
+    /// ドリル区間（自動検出の結果など）から、手動分割の編集画面の初期状態を作る。
+    /// 区切り位置はドリル区間の境目だけにするため、連続する休憩は1つの休憩区間にまとまる
+    static func manualState(
+        fromDrillRanges ranges: [(start: TimeInterval, end: TimeInterval)],
+        totalDuration: TimeInterval
+    ) -> (cutOffsets: [TimeInterval], isDrill: [Bool]) {
+        let boundaries = ranges.flatMap { [$0.start, $0.end] }
+            .filter { $0 > 0 && $0 < totalDuration }
+        let cutOffsets = Array(Set(boundaries)).sorted()
+        let isDrill = segments(cutOffsets: cutOffsets, totalDuration: totalDuration).map { segment in
+            let mid = (segment.start + segment.end) / 2
+            return ranges.contains { $0.start <= mid && mid < $0.end }
+        }
+        return (cutOffsets, isDrill)
+    }
 }

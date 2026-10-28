@@ -16,8 +16,10 @@ struct DrillSplitFieldMapView: View {
     let isFlipped: Bool
     let ranges: [(start: TimeInterval, end: TimeInterval)]
     let breaks: [DrillBreakInterval]
+    /// 再生位置（先頭点からの経過秒）。手動切り出し画面でのみ渡し、地図上にマーカーを出す
+    var currentOffset: TimeInterval? = nil
 
-    /// ドリル区間ごとに巡回して使う色（DrillSplitReviewViewの一覧行のインジケーターとも共有する）
+    /// ドリル区間ごとに巡回して使う色（DrillSplitReviewView・DrillSplitManualEditViewの一覧行とも共有する）
     static let segmentColors: [Color] = [.blue, .green, .orange, .purple, .pink, .teal, .indigo]
 
     var body: some View {
@@ -46,6 +48,18 @@ struct DrillSplitFieldMapView: View {
                     )
                     if let path = createPath(points: points) {
                         path.stroke(Self.segmentColors[index % Self.segmentColors.count], lineWidth: 3)
+                    }
+                }
+
+                // 再生位置マーカー
+                if let currentOffset, !gpsData.points.isEmpty {
+                    let index = SessionDataManager.gpsIndex(in: gpsData.points, atElapsed: currentOffset)
+                    if let position = convertedPoints(for: [gpsData.points[index]], in: geometry.size).first {
+                        Circle()
+                            .fill(Color.red)
+                            .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                            .frame(width: 14, height: 14)
+                            .position(position)
                     }
                 }
             }

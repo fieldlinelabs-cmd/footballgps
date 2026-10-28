@@ -15,8 +15,6 @@ struct FieldPositioningView: View {
     let isFlipped: Bool
     let currentPointIndex: Int
     var sprintSegments: [SprintSegment] = []
-    /// 確定済みトリムの位置に対応するインデックス（未トリムなら nil）
-    var effectiveCutoffIndex: Int? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -27,14 +25,11 @@ struct FieldPositioningView: View {
                 FieldBackgroundView()
                     .frame(width: drawWidth + 40, height: drawHeight + 40)
 
-                // GPS軌跡: 実線/点線の境界は「再生位置を00:00から動かしていればその位置」、
-                // 「動かしていなければ確定済みトリム位置」（無ければ境界なし＝全体実線）を使う。
-                // これにより、開いた直後や00:00まで戻した時も、トリム済みセッションなら
-                // 確定END以降がきちんと点線で示される。スクラブ中は新しい打ち切り候補として
-                // その位置までが実線・以降が点線になる（未確定の確定END位置は別途マーカーで表示）。
+                // GPS軌跡: 再生位置を00:00から動かしていれば、その位置までを実線・以降を点線にする
+                // （動かしていなければ全体を実線）
                 if !allPoints.isEmpty {
                     let keptIndex = min(currentPointIndex, allPoints.count - 1)
-                    let boundaryIndex: Int? = keptIndex > 0 ? keptIndex : effectiveCutoffIndex
+                    let boundaryIndex: Int? = keptIndex > 0 ? keptIndex : nil
 
                     if let boundaryIndex, allPoints.indices.contains(boundaryIndex) {
                         if let keptPath = createPath(points: Array(allPoints[0...boundaryIndex])) {
@@ -47,23 +42,6 @@ struct FieldPositioningView: View {
                     } else if let fullPath = createPath(points: allPoints) {
                         fullPath.stroke(Color.blue, lineWidth: 2)
                     }
-                }
-
-                // 確定済みの打ち切り地点マーカー（現在のスクラブ位置と異なる場合のみ表示）
-                if let cutoffIndex = effectiveCutoffIndex,
-                   cutoffIndex != min(currentPointIndex, allPoints.count - 1),
-                   allPoints.indices.contains(cutoffIndex) {
-                    let cutoffPoint = allPoints[cutoffIndex]
-                    Circle()
-                        .strokeBorder(Color.orange, lineWidth: 2)
-                        .background(Circle().fill(Color.orange.opacity(0.3)))
-                        .frame(width: 14, height: 14)
-                        .position(cutoffPoint)
-                    Text("確定END")
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.orange)
-                        .position(x: cutoffPoint.x, y: cutoffPoint.y - 15)
                 }
 
                 // スプリント区間（赤線）

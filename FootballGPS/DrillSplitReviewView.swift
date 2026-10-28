@@ -3,7 +3,7 @@
 //  FootballGPS
 //
 //  ドリル自動分割（休憩の自動検知）で検出された分割候補を、コーチが確認・確定するための画面。
-//  トリム機能の確認ダイアログと同じ思想: 何が起きるかを見せてから、確定するかどうかを選ばせる。
+//  何が起きるかを見せてから、確定するかどうかを選ばせる。区切りを直したい場合は手動切り出し画面に進める。
 //
 
 import SwiftUI
@@ -74,6 +74,25 @@ struct DrillSplitReviewView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                    }
+                }
+
+                if let gpsData, let field {
+                    Section {
+                        NavigationLink {
+                            DrillSplitManualEditView(
+                                session: session,
+                                gpsData: gpsData,
+                                field: field,
+                                isFlipped: session.isFlipped,
+                                initialRanges: ranges,
+                                onConfirmed: { dismiss() }
+                            )
+                        } label: {
+                            Label("手動で調整する", systemImage: "scissors")
+                        }
+                    } footer: {
+                        Text("区切りを追加・削除したり、区間ごとにドリルか休憩かを切り替えたりできます。")
                     }
                 }
             }

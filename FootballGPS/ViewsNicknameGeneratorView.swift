@@ -149,7 +149,7 @@ struct NicknameGeneratorView: View {
             errorMessage = "画面の準備ができていません。もう一度お試しください。"
             return
         }
-        guard let gpsData = dataManager.getEffectiveGPSData(for: session) else {
+        guard let gpsData = dataManager.getGPSData(for: session.id) else {
             errorMessage = "GPSデータが見つかりませんでした。"
             return
         }
