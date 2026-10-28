@@ -349,6 +349,70 @@ struct GrowthTrendEngineTests {
         #expect(points.allSatisfy { !$0.isPersonalBest })
     }
 
+    private func speedSession(_ id: String, daysAgo: Double, kmh: Double, accuracy: Double) -> TrainingSession {
+        var s = session(id, daysAgo: daysAgo)
+        s.maxSpeed = kmh / 3.6
+        s.gpsAccuracyMedian = accuracy
+        return s
+    }
+
+    @Test func 最初の記録が一番高ければそれが自己ベスト() {
+        let sessions = [
+            session("first", daysAgo: 3, distance: 7200),
+            session("b", daysAgo: 2, distance: 6000),
+            session("c", daysAgo: 1, distance: 6500),
+        ]
+        let best = GrowthTrendEngine.personalBest(sessions: sessions, metric: .distance, position: .all, until: reference)
+        #expect(best?.sessionId == "first")
+        #expect(best?.value == 120)
+    }
+
+    @Test func 期間の外の自己ベストも返す() {
+        let sessions = [
+            session("old", daysAgo: 60, distance: 7200),
+            session("recent", daysAgo: 1, distance: 6000),
+        ]
+        let best = GrowthTrendEngine.personalBest(sessions: sessions, metric: .distance, position: .all, until: reference)
+        #expect(best?.sessionId == "old")
+        let points = GrowthTrendEngine.trendPoints(sessions: sessions, metric: .distance, period: .oneMonth, position: .all, reference: reference, calendar: calendar)
+        #expect(points.map(\.sessionId) == ["recent"])
+        #expect(points.allSatisfy { !$0.isPersonalBest })
+    }
+
+    @Test func GPS精度の悪いセッションの最高速度は自己ベストに使わない() {
+        let sessions = [
+            speedSession("a", daysAgo: 3, kmh: 22, accuracy: 3),
+            speedSession("b", daysAgo: 2, kmh: 25, accuracy: 3),
+            speedSession("noisy", daysAgo: 1, kmh: 29, accuracy: 14),
+        ]
+        let points = GrowthTrendEngine.trendPoints(sessions: sessions, metric: .topSpeed, period: .threeMonths, position: .all, reference: reference, calendar: calendar)
+        #expect(points.map(\.sessionId) == ["a", "b", "noisy"]) // 参考値もグラフには描く
+        #expect(points.first(where: { $0.sessionId == "noisy" })?.isReferenceOnly == true)
+        #expect(points.filter(\.isPersonalBest).map(\.sessionId) == ["b"])
+    }
+
+    @Test func GPS精度の悪いセッションは移動平均と比較に使わない() throws {
+        let reliable = (0..<4).map { speedSession("r\($0)", daysAgo: Double(10 - $0), kmh: 20, accuracy: 3) }
+        let noisy = speedSession("noisy", daysAgo: 1, kmh: 35, accuracy: 14)
+        let points = GrowthTrendEngine.trendPoints(sessions: reliable + [noisy], metric: .topSpeed, period: .threeMonths, position: .all, reference: reference, calendar: calendar)
+        #expect(points.first(where: { $0.sessionId == "noisy" })?.movingAverage == nil)
+        #expect(points.compactMap(\.movingAverage).allSatisfy { abs($0 - 20) < 0.001 })
+
+        // 今回が参考値なら比較しない。比較対象の参考値も使わない
+        #expect(GrowthTrendEngine.todayComparison(target: noisy, comparisons: reliable, metric: .topSpeed) == nil)
+        let target = speedSession("t", daysAgo: 0, kmh: 21, accuracy: 3)
+        let result = try #require(GrowthTrendEngine.todayComparison(target: target, comparisons: reliable + [noisy], metric: .topSpeed))
+        #expect(result.comparisonCount == 4)
+        #expect(result.rank == 1)
+    }
+
+    @Test func GPS精度が悪くても最高速度以外の指標は通常どおり使う() {
+        var s = session("noisy", daysAgo: 1)
+        s.gpsAccuracyMedian = 14
+        #expect(!GrowthTrendEngine.Metric.distance.isReferenceOnly(s))
+        #expect(GrowthTrendEngine.Metric.topSpeed.isReferenceOnly(s))
+    }
+
     @Test func パーセンタイルは線形補間() {
         #expect(GrowthTrendEngine.percentile(sortedValues: [0, 10, 20, 30, 40], 0.25) == 10)
         #expect(GrowthTrendEngine.percentile(sortedValues: [0, 10], 0.75) == 7.5)

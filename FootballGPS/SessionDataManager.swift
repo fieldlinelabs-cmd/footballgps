@@ -61,6 +61,11 @@ class SessionDataManager: ObservableObject {
         let count = SessionDataManager.calculateSprintCount(from: gpsData)
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index].sprintCount = count
+            // Watch が記録中に出した最高速度ではなく、外れ値を除いた速度から計算し直す（技術実装仕様書 §1.8）
+            if !gpsData.points.isEmpty {
+                sessions[index].maxSpeed = SessionDataManager.cleanedMaxSpeed(gpsData.points)
+            }
+            sessions[index].gpsAccuracyMedian = SessionDataManager.medianAccuracy(gpsData.points)
         }
 
         // GPS データからアジリティ（方向転換）を検出
@@ -126,7 +131,7 @@ class SessionDataManager: ObservableObject {
         var candidateStartTime: Date? = nil
         var lastSprintEndTime: Date? = nil
 
-        for point in gpsData.points {
+        for point in removingSpeedSpikes(gpsData.points) {
             let speed = point.speed
             let timestamp = point.timestamp
 
@@ -160,11 +165,70 @@ class SessionDataManager: ObservableObject {
         return count
     }
 
+    // MARK: - 速度の外れ値除去（docs/技術実装仕様書.md §1.8）
+
+    /// サッカーで物理的にあり得ない速度の上限（38km/h。サッカーでの公式な計測記録は37km/h前後が最高）
+    static let maxPlausibleSpeed: Double = 38.0 / 3.6
+
+    /// GPS の誤読による速度の外れ値を、点ごとに直した点列を返す（点の数・順序・位置は変えない）。
+    /// セッションや指標を丸ごと捨てるのではなく、おかしな点の速度だけを前後の点から補う。
+    /// 1. 各点の速度を、前後の点と合わせた3点の真ん中の値にする（＝2回続けて記録された速度だけを採用）。
+    ///    本物のスプリントは最高速度に近い速度が2点以上続くので残り、1点だけ高い値や、
+    ///    上下にギザギザ揺れながら上がる誤読は消える。先頭・末尾は隣の点との低い方
+    /// 2. 1 のあとも 38km/h を超える点（誤読が続いた場合）は、前後の上限以内の点で補う
+    /// 生データ（GPSファイル）は書き換えず、速度を使う計算の入口でこの関数を通す
+    static func removingSpeedSpikes(_ points: [GPSPoint]) -> [GPSPoint] {
+        guard points.count >= 2 else { return points }
+        let raw = points.map(\.speed)
+        var speeds = raw
+
+        // 1. 3点の中央値
+        for i in raw.indices {
+            let window = raw[max(0, i - 1)...min(raw.count - 1, i + 1)].sorted()
+            speeds[i] = window.count == 3 ? window[1] : window[0]
+        }
+
+        // 2. 上限超え。前後で最も近い上限以内の点の平均で補う
+        for i in speeds.indices where speeds[i] > maxPlausibleSpeed {
+            let left = speeds[..<i].last(where: { $0 <= maxPlausibleSpeed })
+            let right = speeds[(i + 1)...].first(where: { $0 <= maxPlausibleSpeed })
+            let neighbors = [left, right].compactMap { $0 }
+            speeds[i] = neighbors.isEmpty ? 0 : neighbors.reduce(0, +) / Double(neighbors.count)
+        }
+
+        guard speeds != raw else { return points }
+        return zip(points, speeds).map { point, speed in
+            guard point.speed != speed else { return point }
+            return GPSPoint(
+                timestamp: point.timestamp,
+                latitude: point.latitude,
+                longitude: point.longitude,
+                speed: speed,
+                altitude: point.altitude,
+                horizontalAccuracy: point.horizontalAccuracy,
+                heartRate: point.heartRate
+            )
+        }
+    }
+
+    /// GPS 精度（horizontalAccuracy）の中央値（m）。点がなければ nil
+    static func medianAccuracy(_ points: [GPSPoint]) -> Double? {
+        guard !points.isEmpty else { return nil }
+        let sorted = points.map(\.horizontalAccuracy).sorted()
+        return sorted[sorted.count / 2]
+    }
+
+    /// 外れ値を除いた速度での最高速度（m/s）
+    static func cleanedMaxSpeed(_ points: [GPSPoint]) -> Double {
+        removingSpeedSpikes(points).map(\.speed).max() ?? 0
+    }
+
     /// 時間帯別運動量を5分単位で集計（非永続化）
     static func computeTimeSeries(
-        gpsPoints: [GPSPoint],
+        gpsPoints rawPoints: [GPSPoint],
         intervalSeconds: TimeInterval = 300
     ) -> [TimeSeriesBucket] {
+        let gpsPoints = removingSpeedSpikes(rawPoints)
         guard let first = gpsPoints.first, let last = gpsPoints.last else { return [] }
         let totalDuration = last.timestamp.timeIntervalSince(first.timestamp)
         guard totalDuration > 0 else { return [] }
@@ -683,7 +747,9 @@ class SessionDataManager: ObservableObject {
     }
 
     /// GPS速度からスプリント区間を検出して返す（非永続化・毎回再計算）
-    static func computeSprintSegments(_ gpsPoints: [GPSPoint]) -> [SprintSegment] {
+    static func computeSprintSegments(_ rawPoints: [GPSPoint]) -> [SprintSegment] {
+        // 点の数・順序は変わらないので、返すインデックスは元の点列にもそのまま使える
+        let gpsPoints = removingSpeedSpikes(rawPoints)
         let threshold = sprintThreshold(
             age: UserProfileManager.shared.age,
             gender: UserProfileManager.shared.profile.gender
@@ -767,7 +833,7 @@ class SessionDataManager: ObservableObject {
         let duration = last.timestamp.timeIntervalSince(first.timestamp)
         let timeSeries = computeTimeSeries(gpsPoints: points)
         let totalDistance = timeSeries.map(\.distance).reduce(0, +)
-        let maxSpeed = points.map(\.speed).max() ?? 0
+        let maxSpeed = cleanedMaxSpeed(points)
         let avgSpeed = duration > 0 ? totalDistance / duration : 0
         let sprintSegments = computeSprintSegments(points)
         let staminaDrop = computeStaminaDropRate(buckets: timeSeries)
@@ -1413,11 +1479,16 @@ class SessionDataManager: ObservableObject {
     private var isBackfilling = false
     private let backfillSprintProfileKey = "backfillSprintProfileKey"
 
-    /// スプリント閾値を決めるプロフィール（年齢・性別）。これが変わったら全セッションの sprintCount を確認し直す
+    /// 速度の外れ値除去（技術実装仕様書 §1.8）のルールの版。ルールを変えたら上げると、
+    /// 次回起動時に全セッションの最高速度・スプリント回数を計算し直す
+    private static let speedCleaningVersion = 2
+
+    /// 全セッションを確認し直す条件のキー。スプリント閾値を決めるプロフィール（年齢・性別）か、
+    /// 速度の外れ値除去のルールが前回の一括計算から変わったら、全セッションの sprintCount・maxSpeed を確認し直す
     private var currentSprintProfileKey: String {
         let age = UserProfileManager.shared.age.map(String.init) ?? "nil"
         let gender = UserProfileManager.shared.profile.gender?.rawValue ?? "nil"
-        return "\(age)-\(gender)"
+        return "\(age)-\(gender)-speed\(Self.speedCleaningVersion)"
     }
 
     /// 推移グラフに必要な派生メトリクスが欠けているセッションを、起動時にまとめて計算する。
@@ -1429,8 +1500,8 @@ class SessionDataManager: ObservableObject {
 
         let age = UserProfileManager.shared.age
         let profileKey = currentSprintProfileKey
-        // sprintCount のズレは GPS データを読まないと分からないため、閾値のプロフィールが
-        // 前回の一括計算から変わったときだけ全セッションを確認する
+        // sprintCount・maxSpeed のズレは GPS データを読まないと分からないため、閾値のプロフィールか
+        // 外れ値除去のルールが前回の一括計算から変わったときだけ全セッションを確認する
         let checkAllSprintCounts = UserDefaults.standard.string(forKey: backfillSprintProfileKey) != profileKey
 
         let ids = sessions.filter { !$0.isSupersededBySplit }.map(\.id)
@@ -1442,7 +1513,8 @@ class SessionDataManager: ObservableObject {
             let needsHR = session.hrIntensityRatio == nil && age != nil
             let needsHeights = hasField && (session.avgPositionHeight == nil || session.backPositionHeight == nil)
             let needsEstimate = hasField && session.estimatedPosition == nil
-            guard checkAllSprintCounts || needsStamina || needsHR || needsHeights || needsEstimate else { continue }
+            let needsAccuracy = session.gpsAccuracyMedian == nil
+            guard checkAllSprintCounts || needsStamina || needsHR || needsHeights || needsEstimate || needsAccuracy else { continue }
 
             // 12ヶ月分をまとめてメモリに載せないよう、LRU キャッシュには入れずに1件ずつ読む
             guard let gpsData = gpsDataCache[id] ?? loadGPSData(sessionId: id),
@@ -1462,8 +1534,16 @@ class SessionDataManager: ObservableObject {
                 sessions[index].sprintCount = sprintCount
                 metricsChanged = true
             }
+            let maxSpeed = Self.cleanedMaxSpeed(gpsData.points)
+            if !gpsData.points.isEmpty, abs(sessions[index].maxSpeed - maxSpeed) > 0.001 {
+                sessions[index].maxSpeed = maxSpeed
+                metricsChanged = true
+            }
             if needsHeights || needsEstimate {
                 applyPositionMetrics(at: index, gpsData: gpsData)
+            }
+            if needsAccuracy {
+                sessions[index].gpsAccuracyMedian = Self.medianAccuracy(gpsData.points)
             }
             persistSessions()
 

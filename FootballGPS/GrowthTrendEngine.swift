@@ -111,6 +111,20 @@ enum GrowthTrendEngine {
             }
         }
 
+        /// GPS 精度の悪いセッションでは参考値として扱う指標か（§10.1）。誤差が直接値を押し上げる最高速度だけ
+        var isAffectedByLowGPSAccuracy: Bool { self == .topSpeed }
+
+        /// このセッションのこの指標が参考値か。参考値はグラフに描くが、移動平均・自己ベスト・
+        /// 成長サマリー・今日の出来の比較には使わない
+        func isReferenceOnly(_ session: TrainingSession) -> Bool {
+            isAffectedByLowGPSAccuracy && session.isLowGPSAccuracy
+        }
+
+        /// 比較・集計に使ってよい値（参考値なら nil）
+        func reliableValue(for session: TrainingSession) -> Double? {
+            isReferenceOnly(session) ? nil : value(for: session)
+        }
+
         /// 高いほど良い指標か。「高さ」はポジションによって望ましい値が違うため、
         /// 順位・自己ベスト・良し悪しの色を付けない（§6.4）
         var hasDirection: Bool { self != .height }
@@ -178,6 +192,7 @@ enum GrowthTrendEngine {
         let duration: TimeInterval
         let movingAverage: Double?
         let isPersonalBest: Bool
+        let isReferenceOnly: Bool  // GPS 精度の悪いセッションの参考値（§10.1）
 
         var id: String { sessionId }
     }
@@ -205,11 +220,14 @@ enum GrowthTrendEngine {
     ) -> [TrendPoint] {
         let inPeriod = filteredSessions(sessions, period: period, position: position, reference: reference, calendar: calendar)
         let valued = inPeriod.compactMap { s in metric.value(for: s).map { (session: s, value: $0) } }
-        let averages = movingAverages(valued.map(\.value))
+        // 移動平均は参考値を除いた点だけで計算し、参考値の点には線を引かない
+        let reliable = valued.filter { !metric.isReferenceOnly($0.session) }
+        let reliableAverages = movingAverages(reliable.map(\.value))
+        let averageById = Dictionary(uniqueKeysWithValues: zip(reliable.map(\.session.id), reliableAverages))
 
         let bestId = personalBest(sessions: sessions, metric: metric, position: position, until: reference)?.sessionId
 
-        return valued.enumerated().map { i, item in
+        return valued.map { item in
             TrendPoint(
                 sessionId: item.session.id,
                 date: item.session.date,
@@ -217,8 +235,9 @@ enum GrowthTrendEngine {
                 frontHeight: metric == .height ? item.session.frontPositionHeight : nil,
                 backHeight: metric == .height ? item.session.backPositionHeight : nil,
                 duration: item.session.duration,
-                movingAverage: averages[i],
-                isPersonalBest: item.session.id == bestId
+                movingAverage: averageById[item.session.id] ?? nil,
+                isPersonalBest: item.session.id == bestId,
+                isReferenceOnly: metric.isReferenceOnly(item.session)
             )
         }
     }
@@ -230,7 +249,7 @@ enum GrowthTrendEngine {
     }
 
     /// 選んだポジション条件の中で、基準日時までの全期間の自己ベスト（有効値の中で一番高い記録。同じ値なら古い方）。
-    /// 期間の外の記録も対象にし、推移画面では点線で値を示す
+    /// 参考値（GPS 精度が低い記録）は使わない。期間の外の記録も対象にし、推移画面では点線で値を示す
     static func personalBest(
         sessions: [TrainingSession],
         metric: Metric,
@@ -241,7 +260,7 @@ enum GrowthTrendEngine {
         let candidates = PlayerDataEngine.eligibleSessions(sessions)
             .filter { position.matches($0) && $0.date <= reference }
             .sorted { $0.date < $1.date }
-            .compactMap { s in metric.value(for: s).map { PersonalBest(sessionId: s.id, date: s.date, value: $0) } }
+            .compactMap { s in metric.reliableValue(for: s).map { PersonalBest(sessionId: s.id, date: s.date, value: $0) } }
         return candidates.reduce(nil) { best, c in
             guard let best else { return c }
             return c.value > best.value ? c : best
@@ -269,8 +288,8 @@ enum GrowthTrendEngine {
     /// 前半・後半のどちらかで値のあるセッションが3件未満なら nil
     static func halfComparison(sessionsInPeriod sessions: [TrainingSession], metric: Metric) -> HalfComparison? {
         let firstCount = sessions.count / 2
-        let firstValues = sessions.prefix(firstCount).compactMap { metric.value(for: $0) }
-        let secondValues = sessions.dropFirst(firstCount).compactMap { metric.value(for: $0) }
+        let firstValues = sessions.prefix(firstCount).compactMap { metric.reliableValue(for: $0) }
+        let secondValues = sessions.dropFirst(firstCount).compactMap { metric.reliableValue(for: $0) }
         guard firstValues.count >= halfComparisonMinPerHalf, secondValues.count >= halfComparisonMinPerHalf else { return nil }
         return HalfComparison(
             firstAverage: firstValues.reduce(0, +) / Double(firstValues.count),
@@ -312,10 +331,11 @@ enum GrowthTrendEngine {
             .filter { $0.id != target.id }
     }
 
-    /// 今日の出来カードに出す、今回のセッションと比較対象の比較。比較対象が3件未満・今回の値がなければ nil
+    /// 今日の出来カードに出す、今回のセッションと比較対象の比較。比較対象が3件未満・今回の値がない・
+    /// 今回の値が参考値（GPS 精度が低い）なら nil。比較対象の参考値も使わない
     static func todayComparison(target: TrainingSession, comparisons: [TrainingSession], metric: Metric) -> TodayComparison? {
-        guard let value = metric.value(for: target) else { return nil }
-        let values = comparisons.compactMap { metric.value(for: $0) }.sorted()
+        guard let value = metric.reliableValue(for: target) else { return nil }
+        let values = comparisons.compactMap { metric.reliableValue(for: $0) }.sorted()
         guard values.count >= todayComparisonMinCount, let minV = values.first, let maxV = values.last else { return nil }
         return TodayComparison(
             value: value,

@@ -145,6 +145,7 @@ struct TodayPerformanceCard: View {
                     TodayMetricRow(
                         metric: metric,
                         currentValue: metric.value(for: session),
+                        isReferenceOnly: metric.isReferenceOnly(session),
                         comparison: GrowthTrendEngine.todayComparison(target: session, comparisons: comparisons, metric: metric)
                     )
                 }
@@ -160,6 +161,7 @@ struct TodayPerformanceCard: View {
 private struct TodayMetricRow: View {
     let metric: GrowthTrendEngine.Metric
     let currentValue: Double?
+    let isReferenceOnly: Bool
     let comparison: GrowthTrendEngine.TodayComparison?
 
     var body: some View {
@@ -185,6 +187,10 @@ private struct TodayMetricRow: View {
                             .font(.caption2.bold())
                             .foregroundStyle(.secondary)
                     }
+                } else if currentValue != nil && isReferenceOnly {
+                    Text("参考値（GPS精度が低い記録）")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 } else if currentValue != nil {
                     Text("データ不足")
                         .font(.caption2)

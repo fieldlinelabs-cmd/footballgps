@@ -78,6 +78,14 @@ struct TrainingSession: Identifiable, Codable {
     var frontPositionHeight: Double?   // 最前線の高さ（95パーセンタイル）
     var backPositionHeight: Double?    // 最低線の高さ（5パーセンタイル）。FW がどこまで守備に戻ったかを見る
 
+    // GPS 精度（horizontalAccuracy）の中央値（m）。精度の悪いセッションの最高速度を参考値として扱うのに使う
+    // （docs/統計推移仕様書.md §10.1）。nil = まだ計算していない
+    var gpsAccuracyMedian: Double?
+
+    /// GPS 精度の悪いセッションか（精度の中央値が10mより悪い）。良い日は2〜4m、悪い日は14m前後と
+    /// はっきり分かれるため、境目の値は結果にあまり影響しない
+    var isLowGPSAccuracy: Bool { (gpsAccuracyMedian ?? 0) > 10 }
+
     enum SessionVisibility: String, Codable {
         case `public` = "public"
         case `private` = "private"
@@ -114,7 +122,8 @@ struct TrainingSession: Identifiable, Codable {
         estimatedPosition: PlayingPosition? = nil,
         avgPositionHeight: Double? = nil,
         frontPositionHeight: Double? = nil,
-        backPositionHeight: Double? = nil
+        backPositionHeight: Double? = nil,
+        gpsAccuracyMedian: Double? = nil
     ) {
         self.id = id
         self.userId = userId
@@ -146,6 +155,7 @@ struct TrainingSession: Identifiable, Codable {
         self.avgPositionHeight = avgPositionHeight
         self.frontPositionHeight = frontPositionHeight
         self.backPositionHeight = backPositionHeight
+        self.gpsAccuracyMedian = gpsAccuracyMedian
     }
     
     /// デフォルトのセッション名（日時ベース）

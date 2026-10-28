@@ -185,6 +185,10 @@ struct GrowthTrendView: View {
             }
         }
         .font(.caption2)
+        if points.contains(where: \.isReferenceOnly) {
+            TrendLegendItem(symbol: .hollowCircle, color: .blue, label: "GPS精度が低い記録（参考値。平均・自己ベストには使わない）")
+                .font(.caption2)
+        }
     }
 
     @ViewBuilder
@@ -229,6 +233,11 @@ struct GrowthTrendView: View {
                         .font(.caption.bold())
                     if point.isPersonalBest {
                         Text("自己ベスト")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if point.isReferenceOnly {
+                        Text("参考値（GPS精度が低い記録）")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -359,6 +368,14 @@ private struct TrendChart: View {
                             .symbolSize(point.id == selectedPointId ? 110 : 60)
                             .foregroundStyle(.green)
                     }
+                } else if point.isReferenceOnly {
+                    // GPS 精度の悪いセッションの参考値は白抜きの丸で描く
+                    PointMark(x: .value("日付", point.date), y: .value(metric.label, point.value))
+                        .symbol {
+                            Circle()
+                                .strokeBorder(Color.blue.opacity(0.7), lineWidth: 1.5)
+                                .frame(width: point.id == selectedPointId ? 12 : 9, height: point.id == selectedPointId ? 12 : 9)
+                        }
                 } else {
                     PointMark(x: .value("日付", point.date), y: .value(metric.label, point.value))
                         .symbol(point.isPersonalBest ? BasicChartSymbolShape.asterisk : BasicChartSymbolShape.circle)
@@ -432,7 +449,7 @@ private struct TrendChart: View {
 }
 
 private struct TrendLegendItem: View {
-    enum Symbol { case circle, triangle, square, star, line }
+    enum Symbol { case circle, hollowCircle, triangle, square, star, line }
     let symbol: Symbol
     let color: Color
     let label: String
@@ -443,6 +460,7 @@ private struct TrendLegendItem: View {
             case .circle:   Image(systemName: "circle.fill").font(.system(size: 8)).foregroundStyle(color)
             case .triangle: Image(systemName: "triangle.fill").font(.system(size: 8)).foregroundStyle(color)
             case .square:   Image(systemName: "square.fill").font(.system(size: 8)).foregroundStyle(color)
+            case .hollowCircle: Image(systemName: "circle").font(.system(size: 8, weight: .bold)).foregroundStyle(color)
             case .star:     Image(systemName: "asterisk").font(.system(size: 9, weight: .bold)).foregroundStyle(color)
             case .line:     Capsule().fill(color).frame(width: 14, height: 2)
             }
