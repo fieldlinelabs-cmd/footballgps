@@ -40,6 +40,8 @@ struct FootballGPSApp: App {
                     Task.detached(priority: .background) {
                         try? await SupabaseManager.shared.ensureAuthenticated()
                     }
+                    // 推移グラフ用に、欠けている派生メトリクス・ポジションを一括計算する（統計推移仕様書 §7）
+                    await SessionDataManager.shared.backfillDerivedMetrics()
                 }
         }
     }

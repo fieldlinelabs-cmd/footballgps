@@ -8,7 +8,7 @@
 import SwiftUI
 
 private enum AppTab: Hashable {
-    case playerData, sessions, fields, test, settings
+    case playerData, stats, sessions, fields, settings
 }
 
 struct ContentView: View {
@@ -43,6 +43,12 @@ struct ContentView: View {
                 }
                 .tag(AppTab.playerData)
 
+            StatsView()
+                .tabItem {
+                    Label("Stats", systemImage: "chart.xyaxis.line")
+                }
+                .tag(AppTab.stats)
+
             SessionsListView()
                 .tabItem {
                     Label("Sessions", systemImage: "list.bullet")
@@ -54,14 +60,6 @@ struct ContentView: View {
                     Label("Fields", systemImage: "map")
                 }
                 .tag(AppTab.fields)
-
-            #if DEBUG
-            DebugTestView()
-                .tabItem {
-                    Label("Test", systemImage: "hammer.fill")
-                }
-                .tag(AppTab.test)
-            #endif
 
             SettingsView()
                 .tabItem {
@@ -88,7 +86,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Debug Test View (シミュレーター用)
+// MARK: - Debug Test View (シミュレーター用、設定画面の「開発者ツール」から開く)
 
 #if DEBUG
 import CoreLocation
@@ -100,82 +98,80 @@ struct DebugTestView: View {
     @State private var alertMessage = ""
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Text("シミュレーターでテストデータを生成できます")
+        List {
+            Section {
+                Text("シミュレーターでテストデータを生成できます")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("デバッグモード")
+            }
+            
+            Section {
+                Button {
+                    generateQuickTestData()
+                } label: {
+                    Label("テストデータを生成", systemImage: "plus.circle.fill")
+                }
+                
+                if !dataManager.sessions.isEmpty {
+                    Text("セッション数: \(dataManager.sessions.count)件")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } header: {
-                    Text("デバッグモード")
                 }
                 
-                Section {
-                    Button {
-                        generateQuickTestData()
-                    } label: {
-                        Label("テストデータを生成", systemImage: "plus.circle.fill")
-                    }
-                    
-                    if !dataManager.sessions.isEmpty {
-                        Text("セッション数: \(dataManager.sessions.count)件")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    if !fieldManager.fields.isEmpty {
-                        Text("フィールド数: \(fieldManager.fields.count)件")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("クイック生成")
+                if !fieldManager.fields.isEmpty {
+                    Text("フィールド数: \(fieldManager.fields.count)件")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                
-                Section {
-                    NavigationLink {
-                        DebugGPSLogView()
-                    } label: {
-                        Label("GPSログを確認", systemImage: "location.fill")
-                    }
-                    NavigationLink {
-                        SprintMeasurementView()
-                    } label: {
-                        Label("計測データ", systemImage: "speedometer")
-                    }
-                    NavigationLink {
-                        CalibrationStatsView()
-                    } label: {
-                        Label("閾値キャリブレーション集計", systemImage: "chart.bar.fill")
-                    }
-                    NavigationLink {
-                        RadarReferenceStatsView()
-                    } label: {
-                        Label("レーダーMax参考集計", systemImage: "chart.bar.fill")
-                    }
-                } header: {
-                    Text("デバッグツール")
-                }
-                
-                Section {
-                    Button(role: .destructive) {
-                        dataManager.clearAllData()
-                        fieldManager.clearAllFields()
-                        alertMessage = "すべてのデータを削除しました"
-                        showAlert = true
-                    } label: {
-                        Label("すべてのデータをクリア", systemImage: "trash.fill")
-                    }
-                } header: {
-                    Text("データ管理")
-                }
+            } header: {
+                Text("クイック生成")
             }
-            .navigationTitle("Debug")
-            .alert("完了", isPresented: $showAlert) {
-                Button("OK") {}
-            } message: {
-                Text(alertMessage)
+            
+            Section {
+                NavigationLink {
+                    DebugGPSLogView()
+                } label: {
+                    Label("GPSログを確認", systemImage: "location.fill")
+                }
+                NavigationLink {
+                    SprintMeasurementView()
+                } label: {
+                    Label("計測データ", systemImage: "speedometer")
+                }
+                NavigationLink {
+                    CalibrationStatsView()
+                } label: {
+                    Label("閾値キャリブレーション集計", systemImage: "chart.bar.fill")
+                }
+                NavigationLink {
+                    RadarReferenceStatsView()
+                } label: {
+                    Label("レーダーMax参考集計", systemImage: "chart.bar.fill")
+                }
+            } header: {
+                Text("デバッグツール")
             }
+            
+            Section {
+                Button(role: .destructive) {
+                    dataManager.clearAllData()
+                    fieldManager.clearAllFields()
+                    alertMessage = "すべてのデータを削除しました"
+                    showAlert = true
+                } label: {
+                    Label("すべてのデータをクリア", systemImage: "trash.fill")
+                }
+            } header: {
+                Text("データ管理")
+            }
+        }
+        .navigationTitle("Debug")
+        .alert("完了", isPresented: $showAlert) {
+            Button("OK") {}
+        } message: {
+            Text(alertMessage)
         }
     }
     

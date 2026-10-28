@@ -216,6 +216,16 @@ struct SessionRow: View {
                         .cornerRadius(4)
                 }
 
+                if let position = session.position {
+                    Text(position.displayName)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.12))
+                        .foregroundStyle(Color.accentColor)
+                        .cornerRadius(4)
+                }
+
                 Spacer()
 
                 Text(formatTime(session.date))

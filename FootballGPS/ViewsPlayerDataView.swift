@@ -2,9 +2,9 @@
 //  ViewsPlayerDataView.swift
 //  FootballGPS
 //
-//  「プレイヤーデータ」画面（§22）。レベル・直近5回平均との比較カード・
-//  バッジ一覧を表示する。計算は PlayerDataEngine に集約し、このファイルは
-//  表示のみを担当する。
+//  「プレイヤーデータ」画面（§22）。レベル・レーダーチャート・バッジ一覧を表示する。
+//  直近5回平均との比較カードと推移は Stats タブ（ViewsGrowthTrendView.swift）にある。
+//  計算は PlayerDataEngine に集約し、このファイルは表示のみを担当する。
 
 import SwiftUI
 
@@ -23,10 +23,6 @@ struct PlayerDataView: View {
     private var xpIntoLevel: Int { PlayerDataEngine.xpIntoCurrentLevel(totalXP) }
     private var xpToNext: Int { PlayerDataEngine.xpToNextLevel(totalXP) }
 
-    private var comparison: PlayerDataEngine.SessionComparison? {
-        PlayerDataEngine.compareToRecentAverage(sessions: sessions)
-    }
-
     private var sections: [PlayerDataEngine.BadgeSection] {
         PlayerDataEngine.allSections(sessions: sessions, playerCategory: profileManager.profile.playerCategory)
     }
@@ -37,7 +33,6 @@ struct PlayerDataView: View {
                 VStack(spacing: 16) {
                     headerCard
                     nicknameButton
-                    comparisonCard
                     radarCard
                     ForEach(sections) { section in
                         badgeSectionView(section)
@@ -173,72 +168,6 @@ struct PlayerDataView: View {
         .frame(width: 78, height: 78)
         .clipShape(Circle())
         .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
-    }
-
-    // MARK: - 比較カード
-
-    @ViewBuilder
-    private var comparisonCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("今回 vs 直近5回平均")
-                .font(.subheadline.bold())
-
-            if let comparison {
-                HStack {
-                    VStack(spacing: 2) {
-                        Text(formatDistance(comparison.currentDistance))
-                            .font(.title3.bold())
-                        Text(formatDuration(comparison.currentDuration))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("今回")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(String(format: "%+.0f%%", comparison.percentDiff))
-                        .font(.caption.bold())
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(comparison.percentDiff >= 0 ? Color.green : Color.orange)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                    Spacer()
-                    VStack(spacing: 2) {
-                        Text(formatDistance(comparison.recentAverageDistance))
-                            .font(.title3.bold())
-                        Text(formatDuration(comparison.recentAverageDuration))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("直近5回平均")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } else {
-                Text("セッションが6件以上貯まると表示されます")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
-        .padding(.horizontal)
-    }
-
-    private func formatDistance(_ meters: Double) -> String {
-        meters >= 1000 ? String(format: "%.1fkm", meters / 1000) : String(format: "%.0fm", meters)
-    }
-
-    private func formatDuration(_ seconds: TimeInterval) -> String {
-        let hours = Int(seconds) / 3600
-        let minutes = Int(seconds) / 60 % 60
-        if hours > 0 {
-            return "\(hours)時間\(minutes)分"
-        } else {
-            return "\(minutes)分"
-        }
     }
 
     // MARK: - レーダーチャート（直近5回平均・自己ベスト・直前のセッション）

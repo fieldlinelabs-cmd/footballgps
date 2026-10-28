@@ -182,6 +182,18 @@ struct SettingsView: View {
                     Text("データ")
                 }
 
+                #if DEBUG
+                Section {
+                    NavigationLink {
+                        DebugTestView()
+                    } label: {
+                        Label("開発者ツール", systemImage: "hammer.fill")
+                    }
+                } header: {
+                    Text("開発者")
+                }
+                #endif
+
                 Section {
                     HStack {
                         Text("バージョン")

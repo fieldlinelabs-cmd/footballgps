@@ -65,6 +65,19 @@ struct TrainingSession: Identifiable, Codable {
     // このセッションがドリル分割によって作られた場合、分割元の結合セッションのid（nil = 分割で作られたものではない）
     var splitFromSessionId: String?
 
+    // ポジション（docs/統計推移仕様書.md §4）。position は集計・表示に使う値で、
+    // .manual ならユーザーが選んだ値、.auto なら estimatedPosition に WB ルール（§5.3）を適用した値
+    var position: PlayingPosition?
+    var positionSource: PositionSource?
+    // ヒートマップから推定した生の結果（WB にはならない）。手動設定が変わったときに WB ルールを
+    // GPS データを読み直さずに適用し直すため、position とは別に持つ
+    var estimatedPosition: PlayingPosition?
+
+    // ポジションの高さ（§6、0…100%。0 = 自陣ゴールライン、100 = 敵陣ゴールライン）
+    var avgPositionHeight: Double?     // 平均の高さ
+    var frontPositionHeight: Double?   // 最前線の高さ（95パーセンタイル）
+    var backPositionHeight: Double?    // 最低線の高さ（5パーセンタイル）。FW がどこまで守備に戻ったかを見る
+
     enum SessionVisibility: String, Codable {
         case `public` = "public"
         case `private` = "private"
@@ -95,7 +108,13 @@ struct TrainingSession: Identifiable, Codable {
         excludeFromAverage: Bool? = nil,
         pendingSplitBreaks: [DrillBreakInterval]? = nil,
         supersededBySplit: Bool? = nil,
-        splitFromSessionId: String? = nil
+        splitFromSessionId: String? = nil,
+        position: PlayingPosition? = nil,
+        positionSource: PositionSource? = nil,
+        estimatedPosition: PlayingPosition? = nil,
+        avgPositionHeight: Double? = nil,
+        frontPositionHeight: Double? = nil,
+        backPositionHeight: Double? = nil
     ) {
         self.id = id
         self.userId = userId
@@ -121,6 +140,12 @@ struct TrainingSession: Identifiable, Codable {
         self.pendingSplitBreaks = pendingSplitBreaks
         self.supersededBySplit = supersededBySplit
         self.splitFromSessionId = splitFromSessionId
+        self.position = position
+        self.positionSource = positionSource
+        self.estimatedPosition = estimatedPosition
+        self.avgPositionHeight = avgPositionHeight
+        self.frontPositionHeight = frontPositionHeight
+        self.backPositionHeight = backPositionHeight
     }
     
     /// デフォルトのセッション名（日時ベース）
@@ -154,6 +179,51 @@ struct TrainingSession: Identifiable, Codable {
 
         return dict
     }
+}
+
+/// プレーしたポジション（docs/統計推移仕様書.md §4.1）。
+/// TrainingSession のフィールドに使うため、Watchアプリターゲットとも共有するこのファイルに置く
+enum PlayingPosition: String, Codable, CaseIterable, Identifiable {
+    case fw = "FW"
+    case wg = "WG"
+    case mf = "MF"
+    case cb = "CB"
+    case sb = "SB"
+    case wb = "WB"
+    case gk = "GK"
+
+    var id: String { rawValue }
+
+    var displayName: String { rawValue }
+
+    /// 選択画面で表示名と一緒に出す補足
+    var includedRoles: String {
+        switch self {
+        case .fw: return "センターフォワード、セカンドトップ"
+        case .wg: return "ウイング、サイドハーフ"
+        case .mf: return "ボランチ、アンカー、インサイドハーフ、セントラルMF、トップ下"
+        case .cb: return "センターバック"
+        case .sb: return "サイドバック（4バックの両サイド）"
+        case .wb: return "ウイングバック（3バック・5バックの両サイド）"
+        case .gk: return "ゴールキーパー"
+        }
+    }
+
+    /// プロスタイル診断での表示（§5.7）。WB はヒートマップで SB・WG と見分けられず、
+    /// どちらかに判定されるため、両方に「（WB）」を付ける
+    var diagnosisLabel: String {
+        switch self {
+        case .wg: return "WG（WB）"
+        case .sb: return "SB（WB）"
+        default:  return displayName
+        }
+    }
+}
+
+/// ポジションの設定元
+enum PositionSource: String, Codable {
+    case auto
+    case manual
 }
 
 /// ドリル自動分割: 検出された休憩区間（先頭GPS点からの経過秒）。
@@ -251,7 +321,7 @@ struct TimeSeriesBucket: Identifiable {
 struct ProStyle: Identifiable {
     let id: String
     let name: String
-    let category: String        // CF / ウイング / センターハーフ / CB / SB
+    let category: PlayingPosition  // .fw / .wg / .mf / .cb / .sb（診断での表示は diagnosisLabel）
     let defensiveThird: Double  // 守備サード目標比率 (0-1)
     let middleThird:    Double  // 中盤サード目標比率 (0-1)
     let attackingThird: Double  // 攻撃サード目標比率 (0-1)
@@ -262,60 +332,60 @@ struct ProStyle: Identifiable {
     let heatmapSpread:  Double  // 0=密集, 1=広域
 
     static let all: [ProStyle] = [
-        // MARK: CF
-        ProStyle(id: "striker",     name: "ストライカー",    category: "CF",
+        // MARK: FW
+        ProStyle(id: "striker",     name: "ストライカー",    category: .fw,
                  defensiveThird: 0.05, middleThird: 0.20, attackingThird: 0.75,
                  lateralBias: 0.10, sprintTarget: 0.70, agilityTarget: 0.40,
                  maxSpeedTarget: 0.88, heatmapSpread: 0.45),
-        ProStyle(id: "target_man",  name: "ターゲットマン",  category: "CF",
+        ProStyle(id: "target_man",  name: "ターゲットマン",  category: .fw,
                  defensiveThird: 0.05, middleThird: 0.15, attackingThird: 0.80,
                  lateralBias: 0.00, sprintTarget: 0.20, agilityTarget: 0.60,
                  maxSpeedTarget: 0.55, heatmapSpread: 0.20),
-        // MARK: ウイング
-        ProStyle(id: "winger_classic", name: "ウインガー（クラシック）", category: "ウイング",
+        // MARK: WG
+        ProStyle(id: "winger_classic", name: "ウインガー（クラシック）", category: .wg,
                  defensiveThird: 0.10, middleThird: 0.30, attackingThird: 0.60,
                  lateralBias: 0.85, sprintTarget: 0.75, agilityTarget: 0.35,
                  maxSpeedTarget: 0.90, heatmapSpread: 0.40),
-        ProStyle(id: "winger_modern", name: "ウインガー（現代型）",     category: "ウイング",
+        ProStyle(id: "winger_modern", name: "ウインガー（現代型）",     category: .wg,
                  defensiveThird: 0.10, middleThird: 0.30, attackingThird: 0.60,
                  lateralBias: 0.70, sprintTarget: 0.50, agilityTarget: 0.70,
                  maxSpeedTarget: 0.75, heatmapSpread: 0.50),
-        // MARK: センターハーフ
-        ProStyle(id: "box_to_box",  name: "ボックス・トゥ・ボックス", category: "センターハーフ",
+        // MARK: MF
+        ProStyle(id: "box_to_box",  name: "ボックス・トゥ・ボックス", category: .mf,
                  defensiveThird: 0.30, middleThird: 0.40, attackingThird: 0.30,
                  lateralBias: 0.10, sprintTarget: 0.70, agilityTarget: 0.50,
                  maxSpeedTarget: 0.65, heatmapSpread: 0.90),
-        ProStyle(id: "regista",     name: "レジスタ",                category: "センターハーフ",
+        ProStyle(id: "regista",     name: "レジスタ",                category: .mf,
                  defensiveThird: 0.40, middleThird: 0.45, attackingThird: 0.15,
                  lateralBias: 0.05, sprintTarget: 0.20, agilityTarget: 0.40,
                  maxSpeedTarget: 0.50, heatmapSpread: 0.40),
-        ProStyle(id: "balancer",    name: "バランサー",              category: "センターハーフ",
+        ProStyle(id: "balancer",    name: "バランサー",              category: .mf,
                  defensiveThird: 0.40, middleThird: 0.45, attackingThird: 0.15,
                  lateralBias: 0.10, sprintTarget: 0.55, agilityTarget: 0.45,
                  maxSpeedTarget: 0.60, heatmapSpread: 0.40),
-        ProStyle(id: "game_maker",  name: "ゲームメーカー",          category: "センターハーフ",
+        ProStyle(id: "game_maker",  name: "ゲームメーカー",          category: .mf,
                  defensiveThird: 0.15, middleThird: 0.45, attackingThird: 0.40,
                  lateralBias: 0.10, sprintTarget: 0.40, agilityTarget: 0.65,
                  maxSpeedTarget: 0.60, heatmapSpread: 0.50),
         // MARK: CB
-        ProStyle(id: "libero",      name: "リベロ型",      category: "CB",
+        ProStyle(id: "libero",      name: "リベロ型",      category: .cb,
                  defensiveThird: 0.65, middleThird: 0.25, attackingThird: 0.10,
                  lateralBias: 0.05, sprintTarget: 0.40, agilityTarget: 0.45,
                  maxSpeedTarget: 0.55, heatmapSpread: 0.70),
-        ProStyle(id: "stopper",     name: "ストッパー型",  category: "CB",
+        ProStyle(id: "stopper",     name: "ストッパー型",  category: .cb,
                  defensiveThird: 0.75, middleThird: 0.20, attackingThird: 0.05,
                  lateralBias: 0.05, sprintTarget: 0.20, agilityTarget: 0.70,
                  maxSpeedTarget: 0.50, heatmapSpread: 0.25),
         // MARK: SB
-        ProStyle(id: "lateral",     name: "ラテラル",          category: "SB",
+        ProStyle(id: "lateral",     name: "ラテラル",          category: .sb,
                  defensiveThird: 0.35, middleThird: 0.35, attackingThird: 0.30,
                  lateralBias: 0.80, sprintTarget: 0.70, agilityTarget: 0.50,
                  maxSpeedTarget: 0.75, heatmapSpread: 0.55),
-        ProStyle(id: "false_sb",    name: "偽サイドバック",    category: "SB",
+        ProStyle(id: "false_sb",    name: "偽サイドバック",    category: .sb,
                  defensiveThird: 0.40, middleThird: 0.45, attackingThird: 0.15,
                  lateralBias: 0.40, sprintTarget: 0.50, agilityTarget: 0.65,
                  maxSpeedTarget: 0.60, heatmapSpread: 0.55),
-        ProStyle(id: "solid_sb",    name: "堅実型サイドバック", category: "SB",
+        ProStyle(id: "solid_sb",    name: "堅実型サイドバック", category: .sb,
                  defensiveThird: 0.55, middleThird: 0.35, attackingThird: 0.10,
                  lateralBias: 0.80, sprintTarget: 0.30, agilityTarget: 0.45,
                  maxSpeedTarget: 0.55, heatmapSpread: 0.40),
@@ -331,7 +401,7 @@ struct StyleSyncResult: Identifiable {
 
 /// ステップ1: ポジション（カテゴリ）判定結果 — ヒートマップ空間類似度のみで算出
 struct PositionSyncResult {
-    let category: String        // CF / ウイング / センターハーフ / CB / SB
+    let category: PlayingPosition  // .fw / .wg / .mf / .cb / .sb
     let positionScore: Double   // 0-100（カテゴリ内スタイルの空間類似度の最大値）
 }
 

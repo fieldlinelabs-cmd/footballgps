@@ -52,6 +52,9 @@ struct SessionDetailView: View {
     // フィールド変更シート
     @State private var showingFieldPicker = false
 
+    // ポジション選択シート
+    @State private var showingPositionPicker = false
+
     // スプリント強調表示
     @State private var showSprints = true
 
@@ -124,6 +127,7 @@ struct SessionDetailView: View {
                 // フィールド未紐付けの場合はピッカーを表示
                 if currentField == nil {
                     fieldPickerSection
+                    TodayPerformanceCard(session: displaySession, sessions: dataManager.sessions)
                 } else {
                     // タブ切り替え
                     Picker("表示", selection: $selectedTab) {
@@ -158,6 +162,9 @@ struct SessionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingFieldPicker) {
             fieldChangeSheet
+        }
+        .sheet(isPresented: $showingPositionPicker) {
+            PositionPickerSheet(session: displaySession)
         }
     }
 
@@ -273,7 +280,11 @@ struct SessionDetailView: View {
             Text(formatDate(session.date))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            
+
+            PositionChip(session: displaySession) {
+                showingPositionPicker = true
+            }
+
             HStack(spacing: 30) {
                 VStack {
                     Text(formatDuration(displaySession.duration))
@@ -742,6 +753,8 @@ struct SessionDetailView: View {
         )
 
         return VStack(alignment: .leading, spacing: 16) {
+            TodayPerformanceCard(session: displaySession, sessions: dataManager.sessions)
+
             Text("詳細統計")
                 .font(.headline)
                 .padding(.horizontal)
@@ -786,6 +799,7 @@ struct SessionDetailView: View {
             // AI監督フィードバック（§20.7: プレイヤータイプ直後・プロスタイル診断の前に配置）
             AICoachFeedbackSection(
                 session: session,
+                defaultPosition: displaySession.position?.displayName,
                 sessionSummary: SessionDataManager.buildFeedbackSummaryText(
                     session: displaySession,
                     thirdRatios: thirdRatios,
@@ -1033,6 +1047,8 @@ private struct TimelineBucketCard: View {
 
 struct AICoachFeedbackSection: View {
     let session: TrainingSession
+    /// ポジション入力欄が空のときの初期値（セッションに設定したポジション、統計推移仕様書 §4.3）
+    let defaultPosition: String?
     let sessionSummary: String
 
     @ObservedObject private var adManager = RewardedAdManager.shared
@@ -1104,6 +1120,9 @@ struct AICoachFeedbackSection: View {
         .padding(.horizontal)
         .onAppear {
             adManager.preload()
+            if positionInput.isEmpty, let defaultPosition {
+                positionInput = defaultPosition
+            }
             Task { await loadHistory() }
         }
     }
@@ -1267,7 +1286,7 @@ struct AICoachFeedbackSection: View {
             currentPersona = latest.persona
             currentPosition = latest.position
             personaInput = latest.persona
-            positionInput = latest.position ?? ""
+            positionInput = latest.position ?? positionInput
         }
     }
 }
@@ -1285,7 +1304,7 @@ struct StyleSyncSection: View {
                     Text("ポジション")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    Text(diagnosis.position.category)
+                    Text(diagnosis.position.category.diagnosisLabel)
                         .font(.title3.bold())
                 }
                 Spacer()

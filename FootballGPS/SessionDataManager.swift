@@ -82,6 +82,7 @@ class SessionDataManager: ObservableObject {
         print("✅ GPSアジリティ検出完了: \(agilityTurnCount)回, スコア=\(agilityScore)")
 
         persistSessions()
+        refreshPositionMetrics(for: session.id, gpsData: gpsData)
 
         print("✅ セッション保存完了: \(session.name), スプリント: \(count)回")
         print("📊 総セッション数: \(sessions.count)")
@@ -331,6 +332,104 @@ class SessionDataManager: ObservableObject {
         return StyleSyncDiagnosis(position: position, typeResults: typeResults)
     }
 
+    // MARK: - Position Estimation（docs/統計推移仕様書.md §5・§6）
+
+    /// 推定・高さの計算に必要な、フィールド内の GPS 点の最小数（約1分）
+    static let minPointsForPositionAnalysis = 60
+
+    /// ポジション推定専用テンプレート（§5.2）。既存の generateIdealHeatmap は守備・中盤・攻撃の
+    /// 3ゾーン中心に分布を置く方式で「ゴール前だけに集中する」分布を表せないため、縦方向の中心を直接指定する。
+    /// WB はヒートマップで SB・WG と見分けられないため作らない
+    private struct PositionTemplate {
+        let position: PlayingPosition
+        let rowCenters: [(row: Double, weight: Double)]  // row=0: 自陣ゴールライン, 27: 敵陣ゴールライン
+        let sigmaRow: Double
+        let lateralBias: Double
+        let sigmaCol: Double
+    }
+
+    private static let positionTemplates: [PositionTemplate] = [
+        PositionTemplate(position: .gk, rowCenters: [(1.0, 1.0)], sigmaRow: 1.8, lateralBias: 0.0, sigmaCol: 4.0),
+    ]
+
+    /// isFlipped を反映したフィールド座標（x: 0〜width 左→右, y: 0〜length 守備→攻撃）。フィールド外の点も含む
+    private static func orientedFieldCoordinates(gpsData: GPSData, field: Field, isFlipped: Bool) -> [CGPoint] {
+        gpsData.points.compactMap { point in
+            guard let fc = field.convertToFieldCoordinate(
+                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+            ) else { return nil }
+            return CGPoint(
+                x: isFlipped ? field.dimensions.width  - fc.x : fc.x,
+                y: isFlipped ? field.dimensions.length - fc.y : fc.y
+            )
+        }
+    }
+
+    private static func inFieldPointCount(_ coords: [CGPoint], field: Field) -> Int {
+        coords.filter {
+            (0...field.dimensions.width).contains($0.x) && (0...field.dimensions.length).contains($0.y)
+        }.count
+    }
+
+    /// ヒートマップの空間類似度からポジションを推定する（§5.1）。WB は返さない。
+    /// フィールド内の点が足りなければ nil
+    static func predictPosition(gpsData: GPSData, field: Field, isFlipped: Bool) -> PlayingPosition? {
+        let coords = orientedFieldCoordinates(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        guard inFieldPointCount(coords, field: field) >= minPointsForPositionAnalysis else { return nil }
+
+        let userGrid = computeHeatmapGrid(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        var scores: [PlayingPosition: Double] = [:]
+        for style in ProStyle.all {
+            let sim = cosineSimilarity(userGrid, generateIdealHeatmap(style: style))
+            scores[style.category] = max(scores[style.category] ?? 0, sim)
+        }
+        for template in positionTemplates {
+            let sim = cosineSimilarity(userGrid, generateTemplateHeatmap(template))
+            scores[template.position] = max(scores[template.position] ?? 0, sim)
+        }
+        return scores.max(by: { $0.value < $1.value })?.key
+    }
+
+    /// ポジションの高さ（§6）。0% = 自陣ゴールライン、100% = 敵陣ゴールライン。
+    /// フィールド外の点は 0〜100% にクランプして含める。フィールド内の点が足りなければ nil
+    static func computePositionHeights(gpsData: GPSData, field: Field, isFlipped: Bool) -> (avg: Double, front: Double, back: Double)? {
+        let coords = orientedFieldCoordinates(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        guard inFieldPointCount(coords, field: field) >= minPointsForPositionAnalysis else { return nil }
+
+        let heights = coords
+            .map { min(max($0.y / field.dimensions.length, 0), 1) * 100 }
+            .sorted()
+        let avg = heights.reduce(0, +) / Double(heights.count)
+        // 最大値・最小値だと GPS の誤差1点に引っ張られるため 95・5 パーセンタイル
+        let frontIndex = Int((Double(heights.count - 1) * 0.95).rounded())
+        let backIndex = Int((Double(heights.count - 1) * 0.05).rounded())
+        return (avg, heights[frontIndex], heights[backIndex])
+    }
+
+    /// WB ルール（§5.3）を適用した position を返す。.manual のセッションはそのまま。
+    /// estimatedPosition が SB・WG で、そのセッションより前の日時で最も新しい手動設定が WB なら WB にする
+    static func applyingWingBackRule(to sessions: [TrainingSession]) -> [TrainingSession] {
+        // 分割で置き換えられた元セッションは一覧に出ないため、手動設定の参照元にしない
+        let manualSessions = sessions
+            .filter { $0.positionSource == .manual && !$0.isSupersededBySplit }
+            .sorted { $0.date < $1.date }
+
+        return sessions.map { session in
+            guard session.positionSource != .manual else { return session }
+            var updated = session
+            if session.estimatedPosition != nil { updated.positionSource = .auto }
+            let latestManual = manualSessions.last(where: { $0.date < session.date })
+            if let estimated = session.estimatedPosition,
+               estimated == .sb || estimated == .wg,
+               latestManual?.position == .wb {
+                updated.position = .wb
+            } else {
+                updated.position = session.estimatedPosition
+            }
+            return updated
+        }
+    }
+
     /// GPSデータから28×40のヒートマップグリッドを生成（コサイン類似度計算用）
     private static func computeHeatmapGrid(
         gpsData: GPSData,
@@ -384,6 +483,34 @@ class SessionDataManager: ObservableObject {
                          + style.attackingThird * exp(-pow(rD - attCenter, 2) / (2 * sigmaRow * sigmaRow))
                 // 横方向: lateralBiasをそのまま「アウトサイド質量比率」として使用（左右対称）
                 let outsideRatio = style.lateralBias
+                let ctrW  = exp(-pow(cD - centerCol, 2) / (2 * sigmaCol * sigmaCol))
+                let leftW = exp(-pow(cD - 5.0,       2) / (2 * sigmaCol * sigmaCol))
+                let rgtW  = exp(-pow(cD - 34.0,      2) / (2 * sigmaCol * sigmaCol))
+                let colW = (1.0 - outsideRatio) * ctrW + outsideRatio * (leftW + rgtW) / 2.0
+                grid[r][c] = rowW * colW
+            }
+        }
+        let mx = grid.flatMap { $0 }.max() ?? 1.0
+        if mx > 0 { for r in 0..<gridRows { for c in 0..<gridCols { grid[r][c] /= mx } } }
+        return grid
+    }
+
+    /// 推定専用テンプレートから理想ヒートマップを生成（横方向の重みは generateIdealHeatmap と同じ式）
+    private static func generateTemplateHeatmap(_ template: PositionTemplate) -> [[Double]] {
+        let gridRows = 28
+        let gridCols = 40
+        var grid = Array(repeating: Array(repeating: 0.0, count: gridCols), count: gridRows)
+        let centerCol = 19.5
+        let sigmaRow = template.sigmaRow
+        let sigmaCol = template.sigmaCol
+
+        for r in 0..<gridRows {
+            for c in 0..<gridCols {
+                let rD = Double(r); let cD = Double(c)
+                let rowW = template.rowCenters.reduce(0.0) { sum, center in
+                    sum + center.weight * exp(-pow(rD - center.row, 2) / (2 * sigmaRow * sigmaRow))
+                }
+                let outsideRatio = template.lateralBias
                 let ctrW  = exp(-pow(cD - centerCol, 2) / (2 * sigmaCol * sigmaCol))
                 let leftW = exp(-pow(cD - 5.0,       2) / (2 * sigmaCol * sigmaCol))
                 let rgtW  = exp(-pow(cD - 34.0,      2) / (2 * sigmaCol * sigmaCol))
@@ -1177,6 +1304,8 @@ class SessionDataManager: ObservableObject {
         persistSessions()
         print("✅ フィールド紐付け更新: sessionId=\(sessionId) -> fieldId=\(fieldId)")
 
+        refreshPositionMetrics(for: sessionId)
+
         // フィールドが判明したことで、未解析だったドリル分割を再解析する
         if sessions[index].pendingSplitBreaks == nil && !sessions[index].isSupersededBySplit {
             analyzeForDrillSplits(sessionId: sessionId)
@@ -1210,6 +1339,159 @@ class SessionDataManager: ObservableObject {
         guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
         sessions[index].isFlipped = isFlipped
         persistSessions()
+        // 向きが逆だと CB と FW を取り違えるため推定し直す
+        refreshPositionMetrics(for: sessionId)
+    }
+
+    // MARK: - Position（docs/統計推移仕様書.md §4・§5）
+
+    /// ポジションの推定結果と高さを、紐付いたフィールドと isFlipped から計算し直す（§5.5）。
+    /// .manual のセッションの position は変えない（estimatedPosition だけ更新する）。
+    /// GPS データが読めない場合は何もしない
+    func refreshPositionMetrics(for sessionId: String, gpsData providedGPSData: GPSData? = nil) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }),
+              let gpsData = providedGPSData ?? getGPSData(for: sessionId) else { return }
+        applyPositionMetrics(at: index, gpsData: gpsData)
+        reapplyWingBackRule()
+    }
+
+    private func applyPositionMetrics(at index: Int, gpsData: GPSData) {
+        let session = sessions[index]
+        var estimated: PlayingPosition?
+        var heights: (avg: Double, front: Double, back: Double)?
+        if let fieldId = session.fieldId, let field = FieldManager.shared.getField(by: fieldId) {
+            estimated = Self.predictPosition(gpsData: gpsData, field: field, isFlipped: session.isFlipped)
+            heights = Self.computePositionHeights(gpsData: gpsData, field: field, isFlipped: session.isFlipped)
+        }
+        sessions[index].estimatedPosition = estimated
+        sessions[index].avgPositionHeight = heights?.avg
+        sessions[index].frontPositionHeight = heights?.front
+        sessions[index].backPositionHeight = heights?.back
+    }
+
+    /// WB ルール（§5.3）を全セッションに適用し直して永続化する。GPS データは読み込まない
+    func reapplyWingBackRule() {
+        sessions = Self.applyingWingBackRule(to: sessions)
+        persistSessions()
+    }
+
+    /// ユーザーがポジションを手動で設定する
+    func setManualPosition(for sessionId: String, position: PlayingPosition) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].position = position
+        sessions[index].positionSource = .manual
+        // 手動の設定が変わると、後のセッションの WB ルールの結果が変わりうる
+        reapplyWingBackRule()
+    }
+
+    /// 手動設定をやめて自動推定に戻す（その場で推定し直す）
+    func resetPositionToAuto(for sessionId: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].positionSource = .auto
+        sessions[index].position = nil
+        persistSessions()
+        refreshPositionMetrics(for: sessionId)
+        // GPS データが読めず refresh が何もしなかった場合も、手動設定の変化を後のセッションに反映する
+        reapplyWingBackRule()
+    }
+
+    /// フィールドの境界が変わったとき、そのフィールドに紐付いたセッションの推定と高さを計算し直す
+    func refreshPositionMetricsForSessions(onField fieldId: String) async {
+        let ids = sessions.filter { $0.fieldId == fieldId }.map(\.id)
+        for id in ids {
+            guard let index = sessions.firstIndex(where: { $0.id == id }),
+                  let gpsData = gpsDataCache[id] ?? loadGPSData(sessionId: id) else { continue }
+            applyPositionMetrics(at: index, gpsData: gpsData)
+            persistSessions()
+            await Task.yield()
+        }
+        reapplyWingBackRule()
+    }
+
+    // MARK: - Backfill（docs/統計推移仕様書.md §7）
+
+    private var isBackfilling = false
+    private let backfillSprintProfileKey = "backfillSprintProfileKey"
+
+    /// スプリント閾値を決めるプロフィール（年齢・性別）。これが変わったら全セッションの sprintCount を確認し直す
+    private var currentSprintProfileKey: String {
+        let age = UserProfileManager.shared.age.map(String.init) ?? "nil"
+        let gender = UserProfileManager.shared.profile.gender?.rawValue ?? "nil"
+        return "\(age)-\(gender)"
+    }
+
+    /// 推移グラフに必要な派生メトリクスが欠けているセッションを、起動時にまとめて計算する。
+    /// 各項目は独立した条件で判定する（ある項目の計算済みフラグに他の項目を相乗りさせない）
+    func backfillDerivedMetrics() async {
+        guard !isBackfilling else { return }
+        isBackfilling = true
+        defer { isBackfilling = false }
+
+        let age = UserProfileManager.shared.age
+        let profileKey = currentSprintProfileKey
+        // sprintCount のズレは GPS データを読まないと分からないため、閾値のプロフィールが
+        // 前回の一括計算から変わったときだけ全セッションを確認する
+        let checkAllSprintCounts = UserDefaults.standard.string(forKey: backfillSprintProfileKey) != profileKey
+
+        let ids = sessions.filter { !$0.isSupersededBySplit }.map(\.id)
+        var processed = 0
+        for id in ids {
+            guard let session = sessions.first(where: { $0.id == id }) else { continue }
+            let hasField = session.fieldId.flatMap { FieldManager.shared.getField(by: $0) } != nil
+            let needsStamina = session.staminaDrop == nil
+            let needsHR = session.hrIntensityRatio == nil && age != nil
+            let needsHeights = hasField && (session.avgPositionHeight == nil || session.backPositionHeight == nil)
+            let needsEstimate = hasField && session.estimatedPosition == nil
+            guard checkAllSprintCounts || needsStamina || needsHR || needsHeights || needsEstimate else { continue }
+
+            // 12ヶ月分をまとめてメモリに載せないよう、LRU キャッシュには入れずに1件ずつ読む
+            guard let gpsData = gpsDataCache[id] ?? loadGPSData(sessionId: id),
+                  let index = sessions.firstIndex(where: { $0.id == id }) else { continue }
+
+            var metricsChanged = false
+            if needsStamina {
+                let drop = Self.computeStaminaDropRate(buckets: Self.computeTimeSeries(gpsPoints: gpsData.points))
+                if drop != nil { sessions[index].staminaDrop = drop; metricsChanged = true }
+            }
+            if needsHR, let age {
+                let ratio = Self.computeHeartRateIntensity(gpsPoints: gpsData.points, age: age)?.highIntensityRatio
+                if ratio != nil { sessions[index].hrIntensityRatio = ratio; metricsChanged = true }
+            }
+            let sprintCount = Self.computeSprintSegments(gpsData.points).count
+            if sessions[index].sprintCount != sprintCount {
+                sessions[index].sprintCount = sprintCount
+                metricsChanged = true
+            }
+            if needsHeights || needsEstimate {
+                applyPositionMetrics(at: index, gpsData: gpsData)
+            }
+            persistSessions()
+
+            if metricsChanged {
+                // 値型の古いコピーを送らないよう、更新後の sessions 配列から読み直してアップロードする
+                let updated = sessions[index]
+                let radar = Self.computePlayerRadar(
+                    totalDistance: updated.totalDistance,
+                    duration: updated.duration,
+                    sprintCount: updated.sprintCount ?? 0,
+                    agilityTurnCount: updated.agilityTurnCount,
+                    staminaDrop: updated.staminaDrop,
+                    hrIntensityRatio: updated.hrIntensityRatio,
+                    maxSpeed: updated.maxSpeed
+                )
+                do {
+                    try await SupabaseManager.shared.uploadSessionSummary(updated, radar: radar)
+                } catch {
+                    print("❌ 一括計算後のSupabaseアップロード失敗: id=\(updated.id) error=\(error)")
+                }
+            }
+            processed += 1
+            await Task.yield()
+        }
+
+        reapplyWingBackRule()
+        UserDefaults.standard.set(profileKey, forKey: backfillSprintProfileKey)
+        print("✅ 派生メトリクスの一括計算完了: \(processed)件")
     }
 
     /// セッション詳細閲覧時に算出した派生メトリクスを永続化

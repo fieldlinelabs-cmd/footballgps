@@ -47,7 +47,7 @@ enum PlayerDataEngine {
     /// 平均・バッジ判定の対象とするセッション（5分未満・「平均から除外」指定は対象外）。
     /// 既存の統計表示（ViewsSessionDetailView等）と同じ基準。プレイヤーデータ機能の
     /// 全計算（比較カード・レーダーチャート・バッジ）はこのフィルタを通したセッションのみを使う。
-    private static func eligibleSessions(_ sessions: [TrainingSession]) -> [TrainingSession] {
+    static func eligibleSessions(_ sessions: [TrainingSession]) -> [TrainingSession] {
         sessions.filter { $0.duration >= 300 && !$0.isExcludedFromAverage && !$0.isSupersededBySplit }
     }
 

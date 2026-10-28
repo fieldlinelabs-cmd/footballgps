@@ -45,6 +45,9 @@ class FieldManager: ObservableObject {
             // 境界の変更で新たに一致率が上がるセッションがあるかもしれないため再解析する
             SessionDataManager.shared.autoAssignFieldIdForUnresolvedSessions()
             SessionDataManager.shared.reanalyzeSessionsForDrillSplits()
+
+            // 境界が変わるとポジションの推定と高さも変わるため計算し直す
+            Task { await SessionDataManager.shared.refreshPositionMetricsForSessions(onField: field.id) }
         }
     }
     
