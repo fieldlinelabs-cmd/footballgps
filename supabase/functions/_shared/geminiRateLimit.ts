@@ -21,7 +21,13 @@ export async function checkGlobalDailyAllowance(admin: AdminClient): Promise<boo
 
   const [feedbacks, nicknames] = await Promise.all([
     admin.from("ai_coach_feedbacks").select("id", { count: "exact", head: true }).gte("created_at", since),
-    admin.from("player_nicknames").select("id", { count: "exact", head: true }).gte("created_at", since),
+    // AI監督フィードバックと同時に生成された二つ名（coach_feedback_idあり）はGemini呼び出しが
+    // ai_coach_feedbacks側の1回なので数えない
+    admin
+      .from("player_nicknames")
+      .select("id", { count: "exact", head: true })
+      .is("coach_feedback_id", null)
+      .gte("created_at", since),
   ]);
 
   if (feedbacks.error || nicknames.error) {

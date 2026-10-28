@@ -1156,6 +1156,27 @@ struct AICoachFeedbackSection: View {
             .background(Color.orange.opacity(0.12))
             .cornerRadius(10)
 
+            // 同じ呼び出しで生成された二つ名（§24）。Player Dataの称号にも反映される
+            if let nickname = result.nickname {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.purple)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("二つ名「\(nickname)」")
+                            .font(.subheadline.bold())
+                        if let reason = result.nicknameReason {
+                            Text(reason)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.purple.opacity(0.12))
+                .cornerRadius(10)
+            }
+
             Button("もう一度やり直す") {
                 Task { await generate(persona: persona, position: position ?? "") }
             }
@@ -1173,12 +1194,7 @@ struct AICoachFeedbackSection: View {
             HStack(spacing: 8) {
                 ForEach(history) { row in
                     Button {
-                        currentResult = AICoachFeedbackResult(
-                            positive: row.positive,
-                            improvement: row.improvement,
-                            summary: row.summary,
-                            personaRecognized: row.personaRecognized
-                        )
+                        currentResult = AICoachFeedbackResult(row: row)
                         currentPersona = row.persona
                         currentPosition = row.position
                         personaInput = row.persona
@@ -1277,12 +1293,7 @@ struct AICoachFeedbackSection: View {
         // 画面再表示時（他セッションを開いて戻ってきた場合等）に、直近の生成結果を
         // 自動的にメイン表示へ復元する。広告・API呼び出しは発生しない（キャッシュのみ）。
         if currentResult == nil, let latest = history.first {
-            currentResult = AICoachFeedbackResult(
-                positive: latest.positive,
-                improvement: latest.improvement,
-                summary: latest.summary,
-                personaRecognized: latest.personaRecognized
-            )
+            currentResult = AICoachFeedbackResult(row: latest)
             currentPersona = latest.persona
             currentPosition = latest.position
             personaInput = latest.persona

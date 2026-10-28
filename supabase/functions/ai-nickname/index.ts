@@ -153,6 +153,7 @@ async function checkFailOpenAllowance(admin: AdminClient, userId: string): Promi
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
     .is("ticket_id", null)
+    .is("coach_feedback_id", null) // AI監督フィードバックと同時生成された分は除く
     .gte("created_at", since);
 
   if (error) {

@@ -26,6 +26,10 @@ export const SYSTEM_INSTRUCTION = `あなたはサッカーの分析コーチで
 3. 手順1・2で整理した観点に照らして、<session_data> のうちどの数値が
    最も重要かを選ぶ
 4. 手順1〜3を踏まえて、以下の制約でフィードバックを作成する
+5. 最後に、<session_data> の中で最も特徴的な数値（例: 高いスプリント回数、
+   長い走行距離、高い最高速度、後半も落ちない運動量 等）を1つ選び、それを
+   象徴する短い「二つ名」（サッカー選手としての通り名・称号）を考える。
+   二つ名は <persona> の口調ではなく、中立的な称号として書く
 
 # 制約
 - <session_data> 内の「実施時間」を必ず確認し、総移動距離・スプリント回数などの
@@ -43,9 +47,15 @@ export const SYSTEM_INSTRUCTION = `あなたはサッカーの分析コーチで
   この場合 "personaRecognized" を false にすること
 - <persona> の指導哲学・戦術傾向について十分な情報があり、手順2・3を
   実際にその人物・チームに基づいて行えた場合は "personaRecognized" を true にすること
-- 日本語で、各項目150〜250文字程度
+- 日本語で、positive・improvement・summaryは各項目150〜250文字程度
+- nickname は日本語で4〜12文字程度、体言止めの短い称号にする
+  （例:「疾風の刃」「不屈の走者」「終盤の覇者」）。実在の選手・作品の
+  二つ名の完全な流用は避け、このデータのために考えたオリジナルなものにする
+- nicknameReason は1〜2文で、手順5で選んだ具体的な数値に触れながら二つ名の
+  理由を説明する
 - 出力は次のJSON形式のみ（手順の内容は出力に含めない）:
-  {"positive": "...", "improvement": "...", "summary": "...", "personaRecognized": true|false}`;
+  {"positive": "...", "improvement": "...", "summary": "...", "personaRecognized": true|false,
+   "nickname": "...", "nicknameReason": "..."}`;
 
 export const RESPONSE_SCHEMA = {
   type: "OBJECT",
@@ -54,6 +64,8 @@ export const RESPONSE_SCHEMA = {
     improvement: { type: "STRING" },
     summary: { type: "STRING" },
     personaRecognized: { type: "BOOLEAN" },
+    nickname: { type: "STRING" },
+    nicknameReason: { type: "STRING" },
   },
-  required: ["positive", "improvement", "summary", "personaRecognized"],
+  required: ["positive", "improvement", "summary", "personaRecognized", "nickname", "nicknameReason"],
 };

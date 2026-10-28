@@ -22,6 +22,9 @@ interface GeminiResult {
   improvement: string;
   summary: string;
   personaRecognized: boolean;
+  // 二つ名（§24）も同じ呼び出しで生成する。欠けていてもフィードバック本体は返す
+  nickname: string | null;
+  nicknameReason: string | null;
 }
 
 const MAX_PERSONA_LENGTH = 50;
@@ -93,20 +96,43 @@ Deno.serve(async (req) => {
     return json({ error: geminiResult.error }, geminiResult.status);
   }
 
-  const { error: insertError } = await admin.from("ai_coach_feedbacks").insert({
-    user_id: user.id,
-    local_session_id: localSessionId,
-    persona,
-    position,
-    ticket_id: ticketId,
-    positive: geminiResult.data.positive,
-    improvement: geminiResult.data.improvement,
-    summary: geminiResult.data.summary,
-    persona_recognized: geminiResult.data.personaRecognized,
-    ...geminiResult.usage,
-  });
+  const { data: savedRow, error: insertError } = await admin
+    .from("ai_coach_feedbacks")
+    .insert({
+      user_id: user.id,
+      local_session_id: localSessionId,
+      persona,
+      position,
+      ticket_id: ticketId,
+      positive: geminiResult.data.positive,
+      improvement: geminiResult.data.improvement,
+      summary: geminiResult.data.summary,
+      persona_recognized: geminiResult.data.personaRecognized,
+      nickname: geminiResult.data.nickname,
+      nickname_reason: geminiResult.data.nicknameReason,
+      ...geminiResult.usage,
+    })
+    .select("id")
+    .single();
   if (insertError) {
     console.error("ai-coach-feedback: failed to save result", insertError);
+  }
+
+  // プレイヤーデータ画面の称号表示（fetchLatestNickname）はplayer_nicknamesの最新行を読むため、
+  // ここにも保存する。coach_feedback_idを付けることで、Geminiの呼び出し回数の集計や
+  // ai-nicknameのfail-open上限で二重に数えないようにする
+  if (savedRow && geminiResult.data.nickname && geminiResult.data.nicknameReason) {
+    const { error: nicknameError } = await admin.from("player_nicknames").insert({
+      user_id: user.id,
+      local_session_id: localSessionId,
+      ticket_id: ticketId,
+      nickname: geminiResult.data.nickname,
+      reason: geminiResult.data.nicknameReason,
+      coach_feedback_id: savedRow.id,
+    });
+    if (nicknameError) {
+      console.error("ai-coach-feedback: failed to save nickname", nicknameError);
+    }
   }
 
   // 成功時のみticketを消費する。失敗時は消費しないことで無料リトライを実現する（§20.6）。
@@ -255,7 +281,21 @@ async function callGemini(
     ) {
       throw new Error("missing or invalid fields in Gemini JSON response");
     }
-    return { ok: true, data: parsed, usage: extractUsage(payload) };
+    const nickname = typeof parsed.nickname === "string" && parsed.nickname.trim() ? parsed.nickname.trim() : null;
+    const nicknameReason =
+      typeof parsed.nicknameReason === "string" && parsed.nicknameReason.trim() ? parsed.nicknameReason.trim() : null;
+    return {
+      ok: true,
+      data: {
+        positive: parsed.positive,
+        improvement: parsed.improvement,
+        summary: parsed.summary,
+        personaRecognized: parsed.personaRecognized,
+        nickname,
+        nicknameReason,
+      },
+      usage: extractUsage(payload),
+    };
   } catch (e) {
     console.error("ai-coach-feedback: failed to parse Gemini JSON", e, text);
     return { ok: false, error: "gemini_parse_error", status: 502 };

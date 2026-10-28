@@ -13,7 +13,6 @@ struct PlayerDataView: View {
     @ObservedObject private var profileManager = UserProfileManager.shared
 
     @State private var latestNickname: NicknameRow?
-    @State private var showNicknameGenerator = false
     @State private var showNicknameReason = false
 
     private var sessions: [TrainingSession] { dataManager.sessions }
@@ -32,7 +31,6 @@ struct PlayerDataView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard
-                    nicknameButton
                     radarCard
                     ForEach(sections) { section in
                         badgeSectionView(section)
@@ -42,14 +40,8 @@ struct PlayerDataView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Player Data")
+            // 二つ名はAI監督フィードバックの生成時に同時に付け直される（技術実装仕様書§20.10）
             .task { await loadLatestNickname() }
-            .sheet(isPresented: $showNicknameGenerator) {
-                NicknameGeneratorView { result in
-                    latestNickname = NicknameRow(
-                        id: UUID(), nickname: result.nickname, reason: result.reason, createdAt: Date()
-                    )
-                }
-            }
         }
     }
 
@@ -121,19 +113,6 @@ struct PlayerDataView: View {
         } message: {
             Text(latestNickname?.reason ?? "")
         }
-    }
-
-    private var nicknameButton: some View {
-        Button {
-            showNicknameGenerator = true
-        } label: {
-            Label(latestNickname == nil ? "二つ名をつける" : "二つ名をつけ直す", systemImage: "sparkles")
-                .font(.caption2)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.horizontal)
     }
 
     private var avatarView: some View {

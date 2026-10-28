@@ -451,6 +451,23 @@ struct AICoachFeedbackResult: Decodable {
     let improvement: String
     let summary: String
     let personaRecognized: Bool
+    /// 同じ呼び出しで生成された二つ名（§24）。この機能より前の履歴ではnil
+    let nickname: String?
+    let nicknameReason: String?
+}
+
+extension AICoachFeedbackResult {
+    /// 履歴（キャッシュ）からの再表示用。広告・API呼び出しは発生しない
+    init(row: AICoachFeedbackRow) {
+        self.init(
+            positive: row.positive,
+            improvement: row.improvement,
+            summary: row.summary,
+            personaRecognized: row.personaRecognized,
+            nickname: row.nickname,
+            nicknameReason: row.nicknameReason
+        )
+    }
 }
 
 /// `ai_coach_feedbacks` テーブルの1行（履歴表示用）
@@ -462,6 +479,8 @@ struct AICoachFeedbackRow: Decodable, Identifiable {
     let improvement: String
     let summary: String
     let personaRecognized: Bool
+    let nickname: String?
+    let nicknameReason: String?
     let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -472,6 +491,8 @@ struct AICoachFeedbackRow: Decodable, Identifiable {
         case improvement
         case summary
         case personaRecognized = "persona_recognized"
+        case nickname
+        case nicknameReason = "nickname_reason"
         case createdAt = "created_at"
     }
 }
