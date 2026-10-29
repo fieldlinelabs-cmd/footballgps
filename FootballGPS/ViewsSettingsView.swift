@@ -157,6 +157,12 @@ struct SettingsView: View {
                 }
                 
                 Section {
+                    NavigationLink {
+                        MeasurementHelpView()
+                    } label: {
+                        Label("数値の見方と着け方", systemImage: "ruler.fill")
+                    }
+
                     Link(destination: URL(string: "https://example.com")!) {
                         Label("ヘルプ", systemImage: "questionmark.circle.fill")
                     }

@@ -364,6 +364,34 @@ struct SessionDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            // GPSの精度が低い記録の表示（統計推移仕様書 §10.2）
+            if displaySession.isLowGPSAccuracy {
+                NavigationLink {
+                    MeasurementHelpView()
+                } label: {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "location.slash.fill")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("GPSの精度が低い記録です")
+                                .font(.caption.bold())
+                            Text("最高速度は参考値で、スプリントの回数も誤差が出やすくなります。雨や汗でリストバンドが濡れると精度が下がることがあります")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(8)
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding()
         .frame(maxWidth: .infinity)
