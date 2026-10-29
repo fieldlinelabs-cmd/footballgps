@@ -25,7 +25,7 @@ const MAX_SESSION_SUMMARY_LENGTH = 4000;
 const TICKET_POLL_INTERVAL_MS = 500;
 const TICKET_POLL_MAX_ATTEMPTS = 10; // 合計最大5秒
 const TICKET_VALID_WINDOW_MS = 5 * 60 * 1000;
-const TICKET_MAX_CONSUMPTIONS = 3;
+const TICKET_MAX_CONSUMPTIONS = 1;
 const GEMINI_MODEL = "gemini-2.5-flash";
 
 Deno.serve(async (req) => {
