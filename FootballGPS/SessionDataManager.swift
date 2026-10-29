@@ -99,13 +99,16 @@ class SessionDataManager: ObservableObject {
         let a = age ?? 25
 
         switch (g, a) {
-        case (.female, ..<20):   return 4.72  // 17.0 km/h
+        // 13歳未満は50代と同じ（技術実装仕様書 §13.4.0）
+        case (.female, ..<13):   return 3.89  // 14.0 km/h
+        case (.female, 13..<20): return 4.72  // 17.0 km/h
         case (.female, 20..<40): return 4.72
         case (.female, 40..<50): return 4.17  // 15.0 km/h
         case (.female, 50..<60): return 3.89  // 14.0 km/h
         case (.female, 60...):   return 3.33  // 12.0 km/h
 
-        case (_, ..<20):   return 5.56  // 20.0 km/h
+        case (_, ..<13):   return 4.44  // 16.0 km/h
+        case (_, 13..<20): return 5.56  // 20.0 km/h
         case (_, 20..<40): return 5.56
         case (_, 40..<50): return 5.00  // 18.0 km/h
         case (_, 50..<60): return 4.44  // 16.0 km/h
@@ -1483,12 +1486,16 @@ class SessionDataManager: ObservableObject {
     /// 次回起動時に全セッションの最高速度・スプリント回数を計算し直す
     private static let speedCleaningVersion = 2
 
+    /// スプリント閾値の表（`sprintThreshold(age:gender:)`）の版。表を変えたら上げると、
+    /// 年齢・性別が変わっていない利用者でも次回起動時に全セッションのスプリント回数を計算し直す
+    private static let sprintThresholdVersion = 2
+
     /// 全セッションを確認し直す条件のキー。スプリント閾値を決めるプロフィール（年齢・性別）か、
     /// 速度の外れ値除去のルールが前回の一括計算から変わったら、全セッションの sprintCount・maxSpeed を確認し直す
     private var currentSprintProfileKey: String {
         let age = UserProfileManager.shared.age.map(String.init) ?? "nil"
         let gender = UserProfileManager.shared.profile.gender?.rawValue ?? "nil"
-        return "\(age)-\(gender)-speed\(Self.speedCleaningVersion)"
+        return "\(age)-\(gender)-speed\(Self.speedCleaningVersion)-threshold\(Self.sprintThresholdVersion)"
     }
 
     /// 推移グラフに必要な派生メトリクスが欠けているセッションを、起動時にまとめて計算する。
