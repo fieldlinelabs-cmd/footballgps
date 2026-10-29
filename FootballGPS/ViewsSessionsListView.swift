@@ -85,6 +85,13 @@ struct SessionsListView: View {
         let adSlots = Self.nativeAdSlots(dates: dates, grouped: grouped)
 
         return List {
+            // まだ見ていない月ごとのまとめ（技術実装仕様書 §27.5）
+            if let latest = MonthlyRecapEngine.availableMonths(sessions: dataManager.sessions).first,
+               !MonthlyRecapSeen.isViewed(latest) {
+                Section {
+                    MonthlyRecapUnseenCard()
+                }
+            }
             ForEach(dates, id: \.self) { date in
                 Section {
                     ForEach(grouped[date] ?? []) { session in

@@ -354,6 +354,19 @@ class SupabaseManager {
         return rows.first
     }
 
+    /// 指定したセッションに対して作られた二つ名を、新しい順に取得する（月ごとのまとめ用、技術実装仕様書 §27.3）
+    func fetchNicknames(localSessionIds: [String]) async throws -> [NicknameRow] {
+        guard let userId = currentUserId, !localSessionIds.isEmpty else { return [] }
+        return try await client
+            .from("player_nicknames")
+            .select()
+            .eq("user_id", value: userId)
+            .in("local_session_id", values: localSessionIds)
+            .order("created_at", ascending: false)
+            .execute()
+            .value
+    }
+
 
     // MARK: - Encodable Row Types
 

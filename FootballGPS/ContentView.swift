@@ -67,6 +67,11 @@ struct ContentView: View {
                 }
                 .tag(AppTab.settings)
         }
+        // 月ごとのまとめの通知を予約する（技術実装仕様書 §27.5）。今月の対象のセッションが3回に達したとき
+        .onAppear { MonthlyRecapNotifier.scheduleIfNeeded(sessions: dataManager.sessions) }
+        .onChange(of: dataManager.sessions.count) { _, _ in
+            MonthlyRecapNotifier.scheduleIfNeeded(sessions: dataManager.sessions)
+        }
         .overlay {
             if dataManager.isMigrating {
                 ZStack {
@@ -96,9 +101,33 @@ struct DebugTestView: View {
     @StateObject private var fieldManager = FieldManager.shared
     @State private var showAlert = false
     @State private var alertMessage = ""
+    #if DEBUG
+    @State private var demoRecap: (recap: MonthlyRecap, preset: MonthlyRecapPreset)?
+    #endif
 
     var body: some View {
         List {
+            #if DEBUG
+            // 月ごとのまとめのサンプル（技術実装仕様書 §27.8）。架空のデータで再生し、実際のデータには保存しない
+            Section {
+                Button {
+                    demoRecap = MonthlyRecapDemo.make()
+                } label: {
+                    Label("サンプルでまとめを見る", systemImage: "sparkles.rectangle.stack.fill")
+                }
+                Text("架空の2か月分のセッションで、月ごとのまとめを再生します。クイズ・継続・自己ベスト・最速のスプリントなど、すべての画面を確かめられます。実際のデータには保存しません")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("月ごとのまとめ")
+            }
+            .fullScreenCover(isPresented: Binding(get: { demoRecap != nil }, set: { if !$0 { demoRecap = nil } })) {
+                if let demoRecap {
+                    MonthlyRecapStoryView(recap: demoRecap.recap, preset: demoRecap.preset)
+                }
+            }
+            #endif
+
             Section {
                 Text("シミュレーターでテストデータを生成できます")
                     .font(.caption)

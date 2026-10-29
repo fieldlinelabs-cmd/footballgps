@@ -568,12 +568,15 @@ struct NicknameRow: Decodable, Identifiable {
     let nickname: String
     let reason: String
     let createdAt: Date
+    /// どのセッションに対して作ったか（月ごとのまとめでセッションと突き合わせる、§27.3）
+    let localSessionId: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case nickname
         case reason
         case createdAt = "created_at"
+        case localSessionId = "local_session_id"
     }
 }
 

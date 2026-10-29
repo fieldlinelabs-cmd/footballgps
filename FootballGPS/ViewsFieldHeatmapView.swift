@@ -35,7 +35,7 @@ struct FieldHeatmapView: View {
                     rows: gridRows,
                     cols: gridCols,
                     size: geometry.size,
-                    field: field
+                    dimensions: field.dimensions
                 )
                 .blur(radius: 6)
 
@@ -70,26 +70,42 @@ struct FieldHeatmapView: View {
 
     /// ヒートマップデータを計算
     private func calculateHeatmap() -> [[Double]] {
-        var grid = Array(repeating: Array(repeating: 0.0, count: gridCols), count: gridRows)
-        
-        // 各GPSポイントをグリッドに配置
-        for point in gpsData.points {
+        HeatmapGrid.compute(
+            normalizedPoints: HeatmapGrid.normalizedPoints(gpsData.points, field: field, isFlipped: isFlipped),
+            rows: gridRows,
+            cols: gridCols
+        )
+    }
+}
+
+/// ヒートマップの格子の計算（1セッションのヒートマップと、月ごとのまとめの重ねたヒートマップで共有）
+enum HeatmapGrid {
+    /// GPS の点をフィールド内の割合（x: ゴールライン方向 0…1、y: タッチライン方向 0…1）に変換する。
+    /// isFlipped の場合はフィールド中心を軸に180度回転する。フィールドの外の点は除く
+    static func normalizedPoints(_ points: [GPSPoint], field: Field, isFlipped: Bool) -> [CGPoint] {
+        points.compactMap { point in
             guard let fieldCoord = field.convertToFieldCoordinate(
                 CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else {
-                continue
-            }
-            
-            // isFlipped の場合はフィールド中心を軸に180度回転 (x, y) → (width-x, length-y)
+            ) else { return nil }
             let fx = isFlipped ? field.dimensions.width  - fieldCoord.x : fieldCoord.x
             let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
+            return CGPoint(x: fx / field.dimensions.width, y: fy / field.dimensions.length)
+        }
+    }
 
-            // フィールド座標をグリッドインデックスに変換
-            let normalizedX = fx / field.dimensions.width
-            let normalizedY = fy / field.dimensions.length
+    /// 割合の点を格子に置き、ガウシアンカーネルで周辺にも広げてから、対数で 0…1 に正規化する
+    static func compute(normalizedPoints: [CGPoint], rows: Int, cols: Int) -> [[Double]] {
+        let raw = rawGrid(normalizedPoints: normalizedPoints, rows: rows, cols: cols)
+        return normalized(raw, maxValue: raw.flatMap { $0 }.max() ?? 0)
+    }
 
-            let col = Int(normalizedX * Double(gridCols)).clamped(to: 0..<gridCols)
-            let row = Int(normalizedY * Double(gridRows)).clamped(to: 0..<gridRows)
+    /// 割合の点を格子に置き、ガウシアンカーネルで周辺にも広げる（正規化の前）
+    static func rawGrid(normalizedPoints: [CGPoint], rows: Int, cols: Int) -> [[Double]] {
+        var grid = Array(repeating: Array(repeating: 0.0, count: cols), count: rows)
+
+        for point in normalizedPoints {
+            let col = Int(point.x * Double(cols)).clamped(to: 0..<cols)
+            let row = Int(point.y * Double(rows)).clamped(to: 0..<rows)
 
             // ガウシアンカーネルで周辺セルにも拡散
             let sigma = 1.5
@@ -98,36 +114,31 @@ struct FieldHeatmapView: View {
                 for dc in -kernelRadius...kernelRadius {
                     let r = row + dr
                     let c = col + dc
-                    guard r >= 0 && r < gridRows && c >= 0 && c < gridCols else { continue }
+                    guard r >= 0 && r < rows && c >= 0 && c < cols else { continue }
                     let distance = sqrt(Double(dr * dr + dc * dc))
                     let weight = exp(-(distance * distance) / (2.0 * sigma * sigma))
                     grid[r][c] += weight
                 }
             }
         }
-
-        // 対数正規化（最大値を1.0に）
-        let maxValue = grid.flatMap { $0 }.max() ?? 1.0
-        if maxValue > 0 {
-            let logMax = log(maxValue + 1)
-            for row in 0..<gridRows {
-                for col in 0..<gridCols {
-                    grid[row][col] = log(grid[row][col] + 1) / logMax
-                }
-            }
-        }
-        
         return grid
+    }
+
+    /// 対数で 0…1 に正規化する。maxValue を共通にすると、積み上がっていく途中の格子を同じ尺度で描ける
+    static func normalized(_ grid: [[Double]], maxValue: Double) -> [[Double]] {
+        guard maxValue > 0 else { return grid }
+        let logMax = log(maxValue + 1)
+        return grid.map { row in row.map { min(1, log($0 + 1) / logMax) } }
     }
 }
 
-/// ヒートマップグリッドを描画
+/// ヒートマップグリッドを描画（フィールドの寸法だけを使うので、複数のフィールドを重ねた月ごとのまとめでも使える）
 struct HeatmapGridView: View {
     let heatmap: [[Double]]
     let rows: Int
     let cols: Int
     let size: CGSize
-    let field: Field
+    let dimensions: Field.FieldDimensions
     
     var body: some View {
         Canvas { context, size in
@@ -136,7 +147,7 @@ struct HeatmapGridView: View {
             let availableHeight = size.height - padding * 2
             
             // フィールドのアスペクト比（長辺が縦になるよう自動計算）
-            let fieldRatio = autoFieldRatio(field.dimensions)
+            let fieldRatio = autoFieldRatio(dimensions)
             
             var drawWidth = availableWidth
             var drawHeight = availableWidth / fieldRatio

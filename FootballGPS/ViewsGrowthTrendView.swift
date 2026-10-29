@@ -52,6 +52,8 @@ struct GrowthTrendView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                // 月ごとのまとめ（技術実装仕様書 §27.5）。対象の月がなければ何も出さない
+                MonthlyRecapEntrySection()
                 RecentComparisonCard(sessions: dataManager.sessions)
                 filterControls
                 chartCard
