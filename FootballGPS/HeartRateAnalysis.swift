@@ -146,6 +146,47 @@ enum HeartRateAnalysis {
         )
     }
 
+    // MARK: - 時間帯別の運動量との組み合わせ（§25.8）
+
+    /// 後半の走行量が前半のこの割合以上なら「保てた」とみなす（既存のスタミナ表示と同じ境目）
+    static let staminaKeptRatio = 0.85
+    /// 前半と後半の平均心拍がこれ以上変わったら「上がった／下がった」とみなす（bpm、仮の値）
+    static let halfChangeBPM = 5.0
+
+    /// 時間帯別の運動量の各区間の平均心拍。start はGPSの最初の点の時刻（computeTimeSeries と同じ起点）
+    static func bucketAverages(_ series: [HeartRateSample], start: Date, buckets: [TimeSeriesBucket]) -> [Double?] {
+        buckets.map { bucket in
+            let from = start.addingTimeInterval(Double(bucket.startMinute * 60))
+            let to = from.addingTimeInterval(bucket.durationSeconds)
+            return summarize(series.filter { $0.timestamp >= from && $0.timestamp < to }, age: nil)?.averageBPM
+        }
+    }
+
+    /// 前半・後半の平均心拍。前半と後半の区切りは computeStaminaDropRate と同じ（区間の数の半分）
+    static func halfAverages(
+        _ series: [HeartRateSample], start: Date, buckets: [TimeSeriesBucket]
+    ) -> (first: Double, second: Double)? {
+        guard buckets.count >= 2 else { return nil }
+        let boundary = start.addingTimeInterval(Double(buckets[buckets.count / 2].startMinute * 60))
+        guard let first = summarize(series.filter { $0.timestamp < boundary }, age: nil)?.averageBPM,
+              let second = summarize(series.filter { $0.timestamp >= boundary }, age: nil)?.averageBPM
+        else { return nil }
+        return (first, second)
+    }
+
+    /// 走行量の変化と心拍の変化を組み合わせた一言（§25.8）
+    static func halfComment(staminaDrop: Double, firstBPM: Double, secondBPM: Double) -> String {
+        let delta = secondBPM - firstBPM
+        if staminaDrop < staminaKeptRatio {
+            return delta > -halfChangeBPM
+                ? "後半は心拍が高いままなのに走る量が落ちました。疲れがたまっていた可能性があります"
+                : "後半は心拍も走る量も下がりました。ペースを落としたか、プレーが落ち着いた時間が多かったようです"
+        }
+        return delta >= halfChangeBPM
+            ? "後半も走る量を保てましたが、心拍は上がっています。終盤に向けて負荷が高まっていました"
+            : "前半と同じペースを、後半も保てました"
+    }
+
     /// 時間の範囲内の心拍の平均。範囲内に記録がなければ、開始前 maxSampleGap 以内の直近の記録を使う
     static func averageBPM(in series: [HeartRateSample], from start: Date, to end: Date) -> Double? {
         let inRange = series.filter { $0.timestamp >= start && $0.timestamp <= end }

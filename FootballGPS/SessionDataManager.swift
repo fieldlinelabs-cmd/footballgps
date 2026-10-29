@@ -683,7 +683,9 @@ class SessionDataManager: ObservableObject {
         thirdRatios: (defensive: Double, middle: Double, attacking: Double),
         staminaDropRate: Double?,
         radar: PlayerRadarData,
-        sprintCount: Int
+        sprintCount: Int,
+        heartRate: HeartRateSummary?,
+        heartRateHalves: (first: Double, second: Double)?
     ) -> String {
         let minutes = max(session.duration / 60.0, 1.0)
 
@@ -704,6 +706,22 @@ class SessionDataManager: ObservableObject {
             lines.append(String(
                 format: "- 後半の運動量: 前半比%.0f%%（後半平均/前半平均の走行距離比）",
                 staminaDropRate * 100
+            ))
+        }
+        // 心拍（技術実装仕様書 §25.8）
+        if let heartRate {
+            lines.append(String(format: "- 心拍: 平均%.0f bpm / 最大%.0f bpm", heartRate.averageBPM, heartRate.maxBPM))
+            if heartRate.estimatedMaxHR != nil, heartRate.countedDuration > 0 {
+                let zones = HeartRateZone.allCases.reversed().map { zone in
+                    String(format: "%@ %.0f%%", zone.label, (heartRate.zoneDurations[zone] ?? 0) / heartRate.countedDuration * 100)
+                }
+                lines.append("- 心拍ゾーンの時間割合（推定最大心拍に対し、Z5=90%以上、Z4=80〜90%、Z3=70〜80%、Z2=60〜70%、Z1=50〜60%、安静=50%未満）: " + zones.joined(separator: " / "))
+            }
+        }
+        if let heartRateHalves {
+            lines.append(String(
+                format: "- 平均心拍の前後半比較: 前半%.0f bpm / 後半%.0f bpm",
+                heartRateHalves.first, heartRateHalves.second
             ))
         }
         lines.append("- プレイヤータイプ: \(radar.playerType.rawValue)（総合スコア\(Int(radar.overallScore))点）")

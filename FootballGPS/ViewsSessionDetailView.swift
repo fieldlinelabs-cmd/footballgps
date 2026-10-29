@@ -813,7 +813,11 @@ struct SessionDetailView: View {
                     thirdRatios: thirdRatios,
                     staminaDropRate: staminaDrop,
                     radar: radar,
-                    sprintCount: sprintCnt
+                    sprintCount: sprintCnt,
+                    heartRate: heartRateSummary,
+                    heartRateHalves: HeartRateAnalysis.halfAverages(
+                        heartRateSeries, start: gpsData.points.first?.timestamp ?? displaySession.date, buckets: timeSeries
+                    )
                 )
             )
 
@@ -843,7 +847,13 @@ struct SessionDetailView: View {
                     .padding(.horizontal)
                 TimelineChartSection(
                     buckets: timeSeries,
-                    staminaDrop: staminaDrop
+                    staminaDrop: staminaDrop,
+                    heartRateByBucket: HeartRateAnalysis.bucketAverages(
+                        heartRateSeries, start: gpsData.points.first?.timestamp ?? displaySession.date, buckets: timeSeries
+                    ),
+                    heartRateHalves: HeartRateAnalysis.halfAverages(
+                        heartRateSeries, start: gpsData.points.first?.timestamp ?? displaySession.date, buckets: timeSeries
+                    )
                 )
             }
 
@@ -937,8 +947,17 @@ struct SessionDetailView: View {
 struct TimelineChartSection: View {
     let buckets: [TimeSeriesBucket]
     let staminaDrop: Double?  // nil or ratio (secondHalf / firstHalf)
+    /// 各区間の平均心拍（技術実装仕様書 §25.8）。心拍の記録がなければ空
+    var heartRateByBucket: [Double?] = []
+    /// 前半・後半の平均心拍。心拍の記録がなければ nil
+    var heartRateHalves: (first: Double, second: Double)? = nil
 
     private var mid: Int { buckets.count / 2 }
+
+    /// 走行距離と心拍の2つのグラフで横軸の位置をそろえるため、縦軸の目盛りの幅を固定する
+    private let yAxisLabelWidth: CGFloat = 40
+
+    private var hasHeartRate: Bool { heartRateByBucket.contains { $0 != nil } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -974,12 +993,17 @@ struct TimelineChartSection: View {
                         if let v = value.as(Double.self) {
                             Text("\(Int(v))m")
                                 .font(.system(size: 10))
+                                .frame(width: yAxisLabelWidth, alignment: .trailing)
                         }
                     }
                     AxisGridLine()
                 }
             }
             .frame(height: 160)
+
+            if hasHeartRate {
+                heartRateChart
+            }
 
             // 凡例
             HStack(spacing: 16) {
@@ -992,6 +1016,9 @@ struct TimelineChartSection: View {
             // スタミナフィードバック
             if let drop = staminaDrop {
                 staminaFeedbackView(drop: drop)
+                if let halves = heartRateHalves {
+                    heartRateHalvesView(drop: drop, halves: halves)
+                }
             }
 
             // 5分サマリーカード
@@ -1008,6 +1035,72 @@ struct TimelineChartSection: View {
         .background(Color(.systemGray6))
         .cornerRadius(12)
         .padding(.horizontal)
+    }
+
+    /// 5分ごとの平均心拍（走行距離の棒グラフと横軸をそろえる）
+    private var heartRateChart: some View {
+        let values = heartRateByBucket.compactMap { $0 }
+        let lower = max(0, (values.min() ?? 60) - 10)
+        let upper = (values.max() ?? 180) + 10
+        return Chart {
+            ForEach(Array(zip(buckets, heartRateByBucket)), id: \.0.id) { bucket, bpm in
+                if let bpm {
+                    LineMark(
+                        x: .value("時間", "\(bucket.startMinute)分"),
+                        y: .value("心拍", bpm)
+                    )
+                    .foregroundStyle(.red)
+                    PointMark(
+                        x: .value("時間", "\(bucket.startMinute)分"),
+                        y: .value("心拍", bpm)
+                    )
+                    .foregroundStyle(.red)
+                    .symbolSize(20)
+                }
+            }
+        }
+        .chartXScale(domain: buckets.map { "\($0.startMinute)分" })
+        .chartYScale(domain: lower...upper)
+        .chartXAxis {
+            AxisMarks(values: .automatic) { _ in
+                AxisValueLabel()
+                    .font(.system(size: 10))
+            }
+        }
+        .chartYAxis {
+            AxisMarks { value in
+                AxisValueLabel {
+                    if let v = value.as(Double.self) {
+                        Text("\(Int(v))")
+                            .font(.system(size: 10))
+                            .frame(width: yAxisLabelWidth, alignment: .trailing)
+                    }
+                }
+                AxisGridLine()
+            }
+        }
+        .chartYAxisLabel("平均心拍 (bpm)", position: .top, alignment: .leading)
+        .frame(height: 110)
+    }
+
+    /// 走行量の変化と心拍の変化を組み合わせた一言（§25.8）
+    private func heartRateHalvesView(drop: Double, halves: (first: Double, second: Double)) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "heart.text.square.fill")
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(HeartRateAnalysis.halfComment(staminaDrop: drop, firstBPM: halves.first, secondBPM: halves.second))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Text(String(format: "平均心拍 前半 %.0f bpm → 後半 %.0f bpm", halves.first, halves.second))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.red.opacity(0.08))
+        .cornerRadius(8)
     }
 
     @ViewBuilder

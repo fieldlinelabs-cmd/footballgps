@@ -234,12 +234,17 @@ struct NicknameGeneratorView: View {
             thirdRatios = (0, 0, 0)
         }
 
+        let heartRateSeries = HeartRateAnalysis.series(for: gpsData)
         return SessionDataManager.buildFeedbackSummaryText(
             session: session,
             thirdRatios: thirdRatios,
             staminaDropRate: staminaDrop,
             radar: radar,
-            sprintCount: sprintCnt
+            sprintCount: sprintCnt,
+            heartRate: HeartRateAnalysis.summarize(heartRateSeries, age: UserProfileManager.shared.age),
+            heartRateHalves: HeartRateAnalysis.halfAverages(
+                heartRateSeries, start: gpsData.points.first?.timestamp ?? session.date, buckets: timeSeries
+            )
         )
     }
 }

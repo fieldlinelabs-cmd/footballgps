@@ -82,6 +82,38 @@ struct HeartRateAnalysisTests {
         #expect(sliced?.map(\.bpm) == [110, 120])
     }
 
+    private func bucket(_ index: Int, minutes: Int = 5) -> TimeSeriesBucket {
+        TimeSeriesBucket(
+            id: index, startMinute: index * 5, distance: 500, sprintCount: 0, maxSpeed: 5,
+            durationSeconds: Double(minutes * 60)
+        )
+    }
+
+    @Test func 区間ごとの平均心拍() {
+        let series = samples([(0, 120), (60, 120), (300, 160), (360, 160)])
+        let averages = HeartRateAnalysis.bucketAverages(series, start: start, buckets: [bucket(0), bucket(1), bucket(2)])
+        #expect(averages[0] == 120)
+        #expect(averages[1] == 160)
+        #expect(averages[2] == nil)
+    }
+
+    @Test func 前半と後半の平均心拍は区間の数の半分で区切る() throws {
+        // 4区間（20分）: 前半は0〜10分、後半は10〜20分
+        let series = samples([(0, 130), (60, 130), (600, 170), (660, 170)])
+        let halves = try #require(HeartRateAnalysis.halfAverages(
+            series, start: start, buckets: [bucket(0), bucket(1), bucket(2), bucket(3)]
+        ))
+        #expect(halves.first == 130)
+        #expect(halves.second == 170)
+    }
+
+    @Test func 走行量と心拍の変化の組み合わせで一言を変える() {
+        #expect(HeartRateAnalysis.halfComment(staminaDrop: 0.7, firstBPM: 150, secondBPM: 152).contains("疲れ"))
+        #expect(HeartRateAnalysis.halfComment(staminaDrop: 0.7, firstBPM: 150, secondBPM: 140).contains("ペースを落とした"))
+        #expect(HeartRateAnalysis.halfComment(staminaDrop: 0.9, firstBPM: 150, secondBPM: 158).contains("負荷が高まって"))
+        #expect(HeartRateAnalysis.halfComment(staminaDrop: 0.9, firstBPM: 150, secondBPM: 152).contains("保てました"))
+    }
+
     @Test func 区間内に記録がなければ直前30秒以内の記録を使う() {
         let series = samples([(0, 150), (50, 170)])
         let near = HeartRateAnalysis.averageBPM(in: series, from: start.addingTimeInterval(20), to: start.addingTimeInterval(25))
