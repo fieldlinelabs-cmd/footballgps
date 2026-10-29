@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 結果カードに載せる値。セッション詳細で計算済みの値を渡す
 struct ShareCardData {
@@ -145,9 +144,13 @@ struct ShareCardView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "soccerball")
-                .font(.system(size: 14, weight: .bold))
+        HStack(spacing: 8) {
+            // アプリのアイコン（起動画面と同じ画像）。iOSのアイコンと同じ角丸にする
+            Image("AppLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 24, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 5.4, style: .continuous))
             Text("FootballGPS")
                 .font(.system(size: 14, weight: .bold))
             Spacer()
@@ -156,13 +159,16 @@ struct ShareCardView: View {
     }
 }
 
-/// 共有する PNG（透明の背景を保つため PNG で渡す）
-struct ShareCardImage: Transferable {
-    let pngData: Data
+/// iOS標準の共有画面。ShareLink に PNG のデータを渡す方式では「画像を保存」が出ず、Instagram でも
+/// 「コンテンツを利用できません」となったため、UIImage を UIActivityViewController に直接渡す（§26.3）
+struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
 
-    static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .png) { $0.pngData }
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 /// カードのプレビューと共有
@@ -174,7 +180,9 @@ struct ShareCardSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var background: ShareCardBackground = .normal
-    @State private var rendered: (image: UIImage, png: Data)?
+    /// PNG のデータから作り直した画像（透明の背景の透過を保つ）
+    @State private var rendered: UIImage?
+    @State private var showingActivity = false
 
     var body: some View {
         NavigationStack {
@@ -197,13 +205,11 @@ struct ShareCardSheet: View {
                         .padding(.horizontal)
                 }
 
-                if let rendered {
-                    ShareLink(
-                        item: ShareCardImage(pngData: rendered.png),
-                        message: Text("#FootballGPS"),
-                        preview: SharePreview("FootballGPS", image: Image(uiImage: rendered.image))
-                    ) {
-                        Label("共有", systemImage: "square.and.arrow.up")
+                if rendered != nil {
+                    Button {
+                        showingActivity = true
+                    } label: {
+                        Label("共有・保存", systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -221,6 +227,13 @@ struct ShareCardSheet: View {
             }
             .onAppear { render() }
             .onChange(of: background) { _, _ in render() }
+            .sheet(isPresented: $showingActivity) {
+                if let rendered {
+                    // 画像だけを渡す（文章を一緒に渡すと受け付けない共有先があるため）
+                    ActivityView(items: [rendered])
+                        .presentationDetents([.medium, .large])
+                }
+            }
         }
     }
 
@@ -253,10 +266,11 @@ struct ShareCardSheet: View {
         )
         renderer.scale = 3
         renderer.isOpaque = background == .normal
-        guard let image = renderer.uiImage, let png = image.pngData() else {
+        // PNG を経由して作り直すことで、透明の背景の透過を保った画像にする
+        guard let png = renderer.uiImage?.pngData(), let image = UIImage(data: png) else {
             rendered = nil
             return
         }
-        rendered = (image, png)
+        rendered = image
     }
 }
