@@ -47,6 +47,7 @@ struct SessionDetailView: View {
     @State private var hrIntensity: (highIntensityRatio: Double, highIntensitySprintCount: Int)? = nil
     @State private var heartRateSeries: [HeartRateSample] = []
     @State private var heartRateSummary: HeartRateSummary? = nil
+    @State private var showingShareCard = false
 
     // プロスタイル診断
     @State private var syncDiagnosis: StyleSyncDiagnosis?
@@ -162,6 +163,24 @@ struct SessionDetailView: View {
         }
         .navigationTitle(session.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // 結果カードの共有（技術実装仕様書 §26）。ヒートマップを載せるため、フィールドが決まっているときだけ
+            if currentField != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingShareCard = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .accessibilityLabel("結果を共有")
+                }
+            }
+        }
+        .sheet(isPresented: $showingShareCard) {
+            if let field = currentField {
+                ShareCardSheet(data: shareCardData(), gpsData: gpsData, field: field, isFlipped: isFlipped)
+            }
+        }
         .sheet(isPresented: $showingFieldPicker) {
             fieldChangeSheet
         }
@@ -171,6 +190,33 @@ struct SessionDetailView: View {
         // 見終わった後のインタースティシャル広告（広告仕様書§4.2.1）。一覧へ戻る・別タブへ切り替えで離れたときに判定する
         .onAppear { InterstitialAdManager.shared.detailDidAppear(sessionId: session.id) }
         .onDisappear { InterstitialAdManager.shared.detailDidDisappear(sessionId: session.id) }
+    }
+
+    // MARK: - Share Card
+
+    /// 結果カードに載せる値。統計タブと同じ計算で求める
+    private func shareCardData() -> ShareCardData {
+        let sprintCnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
+        let radar = SessionDataManager.computePlayerRadar(
+            totalDistance: displaySession.totalDistance,
+            duration: displaySession.duration,
+            sprintCount: sprintCnt,
+            agilityTurnCount: displaySession.agilityTurnCount,
+            staminaDrop: SessionDataManager.computeStaminaDropRate(buckets: timeSeries),
+            hrIntensityRatio: hrIntensity?.highIntensityRatio,
+            maxSpeed: displaySession.maxSpeed
+        )
+        return ShareCardData(
+            date: displaySession.date,
+            position: displaySession.position,
+            playerType: radar.playerType,
+            proStyle: syncDiagnosis?.typeResults.first.map { ($0.style.name, $0.syncRate) },
+            totalDistance: displaySession.totalDistance,
+            maxSpeed: displaySession.maxSpeed,
+            sprintCount: sprintCnt,
+            duration: displaySession.duration,
+            averageHeartRate: heartRateSummary?.averageBPM
+        )
     }
 
     // MARK: - Field Change Sheet
