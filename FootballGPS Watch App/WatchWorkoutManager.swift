@@ -28,6 +28,14 @@ class WorkoutManager: NSObject, ObservableObject {
     @Published var maxSpeed: Double = 0 // m/s
     
     @Published var heartRate: Double = 0 // BPM
+    /// GPSとは別に記録する心拍（技術実装仕様書 §25.2）。止まっているあいだも記録される
+    private(set) var heartRateSamples: [HeartRateSample] = []
+
+    /// 記録した心拍の平均（終了後のサマリー用）。記録がなければ 0
+    var averageHeartRate: Double {
+        guard !heartRateSamples.isEmpty else { return 0 }
+        return heartRateSamples.map(\.bpm).reduce(0, +) / Double(heartRateSamples.count)
+    }
     @Published var activeCalories: Double = 0 // kcal
     @Published var zoneDistances: [Double] = [0, 0, 0, 0, 0] // Zone1-5 (m)
 
@@ -348,13 +356,16 @@ class WorkoutManager: NSObject, ObservableObject {
             maxSpeed: maxSpeed,
             avgSpeed: avgSpeed,
             sprintCount: nil,
-            heartRate: heartRate > 0 ? heartRate : nil,
+            // 平均心拍と最大心拍は iPhone の saveSession で心拍の列から計算し直す（§25.4）
+            heartRate: averageHeartRate > 0 ? averageHeartRate : nil,
+            maxHeartRate: heartRateSamples.map(\.bpm).max(),
             activeCalories: activeCalories > 0 ? activeCalories : nil
         )
         
         let gpsData = GPSData(
             sessionId: session.id,
-            points: gpsPoints
+            points: gpsPoints,
+            heartRateSamples: heartRateSamples
         )
         
         return (session, gpsData)
@@ -367,6 +378,7 @@ class WorkoutManager: NSObject, ObservableObject {
         currentSpeed = 0
         maxSpeed = 0
         heartRate = 0
+        heartRateSamples.removeAll()
         activeCalories = 0
         zoneDistances = [0, 0, 0, 0, 0]
         locations.removeAll()
@@ -524,10 +536,18 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
             guard let quantityType = type as? HKQuantityType else { continue }
             // Sendable な Double? として事前に取得してから Task に渡す
             if quantityType == HKQuantityType.quantityType(forIdentifier: .heartRate) {
-                let bpm = workoutBuilder.statistics(for: quantityType)?.mostRecentQuantity()?
+                let statistics = workoutBuilder.statistics(for: quantityType)
+                let bpm = statistics?.mostRecentQuantity()?
                     .doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+                let measuredAt = statistics?.mostRecentQuantityDateInterval()?.end
                 Task { @MainActor in
-                    if let bpm { self.heartRate = bpm }
+                    guard let bpm else { return }
+                    self.heartRate = bpm
+                    // 同じ値が重ねて届くことがあるため、直前より新しい時刻のときだけ記録する
+                    if let measuredAt,
+                       measuredAt > (self.heartRateSamples.last?.timestamp ?? .distantPast) {
+                        self.heartRateSamples.append(HeartRateSample(timestamp: measuredAt, bpm: bpm))
+                    }
                 }
             } else if quantityType == HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
                 let kcal = workoutBuilder.statistics(for: quantityType)?.sumQuantity()?

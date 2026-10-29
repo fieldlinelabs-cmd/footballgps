@@ -285,6 +285,7 @@ struct SessionRow: View {
                     color: .orange
                 )
 
+                // 平均心拍（技術実装仕様書 §25.4）
                 if let bpm = session.heartRate, bpm > 0 {
                     StatBadge(
                         icon: "heart.fill",

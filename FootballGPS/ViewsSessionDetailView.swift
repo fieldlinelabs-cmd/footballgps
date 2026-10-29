@@ -45,6 +45,8 @@ struct SessionDetailView: View {
 
     // 高強度分析（HR × スプリント）
     @State private var hrIntensity: (highIntensityRatio: Double, highIntensitySprintCount: Int)? = nil
+    @State private var heartRateSeries: [HeartRateSample] = []
+    @State private var heartRateSummary: HeartRateSummary? = nil
 
     // プロスタイル診断
     @State private var syncDiagnosis: StyleSyncDiagnosis?
@@ -460,9 +462,11 @@ struct SessionDetailView: View {
             currentTime = 0
             sprintSegments = SessionDataManager.computeSprintSegments(gpsData.points)
             timeSeries = SessionDataManager.computeTimeSeries(gpsPoints: gpsData.points)
+            heartRateSeries = HeartRateAnalysis.series(for: gpsData)
+            heartRateSummary = HeartRateAnalysis.summarize(heartRateSeries, age: UserProfileManager.shared.age)
             if let age = UserProfileManager.shared.age {
                 hrIntensity = SessionDataManager.computeHeartRateIntensity(
-                    gpsPoints: gpsData.points, age: age
+                    gpsPoints: gpsData.points, heartRateSamples: gpsData.heartRateSamples, age: age
                 )
             }
             // sprintCount は記録時点の古い閾値で保存されている場合があるため、
@@ -781,8 +785,9 @@ struct SessionDetailView: View {
                     icon: "arrow.triangle.turn.up.right.diamond.fill"
                 )
 
-                if let bpm = session.heartRate, bpm > 0 {
-                    StatisticRow(label: "心拍数", value: String(format: "%.0f bpm", bpm), icon: "heart.fill")
+                if let summary = heartRateSummary {
+                    StatisticRow(label: "平均心拍", value: String(format: "%.0f bpm", summary.averageBPM), icon: "heart.fill")
+                    StatisticRow(label: "最大心拍", value: String(format: "%.0f bpm", summary.maxBPM), icon: "heart.circle.fill")
                 }
                 if let kcal = session.activeCalories, kcal > 0 {
                     StatisticRow(label: "消費カロリー", value: String(format: "%.0f kcal", kcal), icon: "flame.fill")
@@ -842,12 +847,19 @@ struct SessionDetailView: View {
                 )
             }
 
-            // 心拍数×強度分析
-            if let intensity = hrIntensity {
-                Text("心拍数強度分析")
+            // 心拍の推移とゾーン（技術実装仕様書 §25.5）
+            if let summary = heartRateSummary {
+                Text("心拍")
                     .font(.headline)
                     .padding(.horizontal)
-                IntensityAnalysisSection(intensity: intensity)
+                HeartRateSection(
+                    series: heartRateSeries,
+                    summary: summary,
+                    startDate: gpsData.points.first?.timestamp ?? heartRateSeries.first?.timestamp ?? displaySession.date
+                )
+                if let intensity = hrIntensity {
+                    IntensityAnalysisSection(intensity: intensity)
+                }
             }
 
             // デバッグ情報

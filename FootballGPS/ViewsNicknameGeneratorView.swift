@@ -210,7 +210,9 @@ struct NicknameGeneratorView: View {
 
         let hrIntensity: (highIntensityRatio: Double, highIntensitySprintCount: Int)? =
             UserProfileManager.shared.age.flatMap {
-                SessionDataManager.computeHeartRateIntensity(gpsPoints: gpsData.points, age: $0)
+                SessionDataManager.computeHeartRateIntensity(
+                    gpsPoints: gpsData.points, heartRateSamples: gpsData.heartRateSamples, age: $0
+                )
             }
 
         let radar = SessionDataManager.computePlayerRadar(

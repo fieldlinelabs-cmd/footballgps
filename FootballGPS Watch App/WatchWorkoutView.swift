@@ -298,8 +298,8 @@ struct SummaryView: View {
                     SummaryRow(label: "平均", value: String(format: "%.1f m/s", workoutManager.distance / max(workoutManager.elapsedTime, 1)))
                     SummaryRow(label: "最高", value: String(format: "%.1f m/s", workoutManager.maxSpeed))
                     SummaryRow(label: "GPS", value: "\(workoutManager.lastGPSPointCount)点")
-                    SummaryRow(label: "心拍数", value: workoutManager.heartRate > 0
-                        ? String(format: "%.0f bpm", workoutManager.heartRate) : "--")
+                    SummaryRow(label: "平均心拍", value: workoutManager.averageHeartRate > 0
+                        ? String(format: "%.0f bpm", workoutManager.averageHeartRate) : "--")
                     SummaryRow(label: "カロリー", value: workoutManager.activeCalories > 0
                         ? String(format: "%.0f kcal", workoutManager.activeCalories) : "--")
                     SummaryRow(label: "最大加速度", value: workoutManager.peakAcceleration > 0

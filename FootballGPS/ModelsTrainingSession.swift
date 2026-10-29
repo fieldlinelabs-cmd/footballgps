@@ -35,7 +35,8 @@ struct TrainingSession: Identifiable, Codable {
     var gpsDataPath: String?
 
     // ヘルスケアデータ
-    var heartRate: Double?       // セッション終了時点の心拍数 (bpm)
+    var heartRate: Double?       // 平均心拍 (bpm)。iPhone の saveSession で心拍の列から計算し直す（技術実装仕様書 §25.4）
+    var maxHeartRate: Double?    // 最大心拍 (bpm)。同上
     var activeCalories: Double?  // セッション中の消費カロリー (kcal)
 
     // アジリティ検出結果（nil = 未処理 / rawMotionファイル未着）
@@ -108,6 +109,7 @@ struct TrainingSession: Identifiable, Codable {
         isFlipped: Bool = false,
         gpsDataPath: String? = nil,
         heartRate: Double? = nil,
+        maxHeartRate: Double? = nil,
         activeCalories: Double? = nil,
         agilityTurnCount: Int? = nil,
         agilityScore: Int? = nil,
@@ -140,6 +142,7 @@ struct TrainingSession: Identifiable, Codable {
         self.isFlipped = isFlipped
         self.gpsDataPath = gpsDataPath
         self.heartRate = heartRate
+        self.maxHeartRate = maxHeartRate
         self.activeCalories = activeCalories
         self.agilityTurnCount = agilityTurnCount
         self.agilityScore = agilityScore
@@ -275,10 +278,18 @@ struct GPSPoint: Codable {
     }
 }
 
+/// GPSとは別に記録した心拍（技術実装仕様書 §25.2）。止まっているあいだも数秒ごとに記録される
+struct HeartRateSample: Codable {
+    let timestamp: Date
+    let bpm: Double
+}
+
 /// GPSデータの配列（JSON保存用）
 struct GPSData: Codable {
     let sessionId: String
     let points: [GPSPoint]
+    /// GPSとは別に記録した心拍（§25.2）。この機能より前の記録では nil
+    var heartRateSamples: [HeartRateSample]? = nil
 }
 
 /// Watch→iPhone間のセッション＋GPSデータ転送用ペイロード（JSONファイルに書き出しtransferFileで送る）。

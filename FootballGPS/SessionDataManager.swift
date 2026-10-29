@@ -66,6 +66,11 @@ class SessionDataManager: ObservableObject {
                 sessions[index].maxSpeed = SessionDataManager.cleanedMaxSpeed(gpsData.points)
             }
             sessions[index].gpsAccuracyMedian = SessionDataManager.medianAccuracy(gpsData.points)
+            // 平均心拍・最大心拍は心拍の列から計算し直す（Watch の値は記録中の簡易計算のため、§25.4）
+            if let summary = HeartRateAnalysis.summarize(HeartRateAnalysis.series(for: gpsData), age: nil) {
+                sessions[index].heartRate = summary.averageBPM
+                sessions[index].maxHeartRate = summary.maxBPM
+            }
         }
 
         // GPS データからアジリティ（方向転換）を検出
@@ -717,34 +722,28 @@ class SessionDataManager: ObservableObject {
         }
     }
 
-    /// HR付きGPSPointsから高強度割合・高強度スプリント回数を計算
+    /// 心拍の列から高強度割合・高強度スプリント回数を計算（技術実装仕様書 §25.3）。
+    /// 高強度割合は点の数ではなく時間で数える（Z4＋Z5 の時間 ÷ 数えた時間）
     /// - Returns: (highIntensityRatio: 0–100%, highIntensitySprintCount)
-    ///   HRデータが存在しない場合は nil を返す
+    ///   心拍の記録がない、または時間で数えられる区間がない場合は nil を返す
     static func computeHeartRateIntensity(
         gpsPoints: [GPSPoint],
+        heartRateSamples: [HeartRateSample]?,
         age: Int
     ) -> (highIntensityRatio: Double, highIntensitySprintCount: Int)? {
-        let hrPoints = gpsPoints.compactMap { $0.heartRate }
-        guard !hrPoints.isEmpty else { return nil }
+        let series = HeartRateAnalysis.series(heartRateSamples: heartRateSamples, points: gpsPoints)
+        guard let ratio = HeartRateAnalysis.summarize(series, age: age)?.highIntensityRatio else { return nil }
 
-        let maxHR = maxHeartRate(age: age)
-        let threshold = maxHR * 0.80
-
-        // 高強度割合
-        let highCount = hrPoints.filter { $0 >= threshold }.count
-        let ratio = Double(highCount) / Double(hrPoints.count) * 100.0
-
-        // 高強度スプリント回数：スプリント区間の中でHR >= 80%maxHR の区間を数える
-        let sprintSegments = computeSprintSegments(gpsPoints)
-        var highIntensitySprints = 0
-        for seg in sprintSegments {
-            let segPoints = Array(gpsPoints[seg.startIndex...seg.endIndex])
-            let segHR = segPoints.compactMap { $0.heartRate }
-            if !segHR.isEmpty {
-                let avgHR = segHR.reduce(0, +) / Double(segHR.count)
-                if avgHR >= threshold { highIntensitySprints += 1 }
-            }
-        }
+        // 高強度スプリント回数：スプリント区間の時間内の心拍の平均が 80%maxHR 以上の区間を数える
+        let threshold = maxHeartRate(age: age) * HeartRateZone.z4.lowerRatio
+        let highIntensitySprints = computeSprintSegments(gpsPoints).filter { seg in
+            guard let avgHR = HeartRateAnalysis.averageBPM(
+                in: series,
+                from: gpsPoints[seg.startIndex].timestamp,
+                to: gpsPoints[seg.endIndex].timestamp
+            ) else { return false }
+            return avgHR >= threshold
+        }.count
 
         return (highIntensityRatio: ratio, highIntensitySprintCount: highIntensitySprints)
     }
@@ -830,8 +829,9 @@ class SessionDataManager: ObservableObject {
         let hrIntensity: (highIntensityRatio: Double, highIntensitySprintCount: Int)?
     }
 
-    /// points に対して全メトリクスを計算する。points.count < 2 なら nil（算出不可）
-    static func computeSegmentStats(points: [GPSPoint]) -> SegmentStats? {
+    /// points に対して全メトリクスを計算する。points.count < 2 なら nil（算出不可）。
+    /// heartRateSamples は points と同じ時間の範囲に切り出したもの（HeartRateAnalysis.sliced）
+    static func computeSegmentStats(points: [GPSPoint], heartRateSamples: [HeartRateSample]?) -> SegmentStats? {
         guard let first = points.first, let last = points.last, points.count >= 2 else { return nil }
         let duration = last.timestamp.timeIntervalSince(first.timestamp)
         let timeSeries = computeTimeSeries(gpsPoints: points)
@@ -841,7 +841,7 @@ class SessionDataManager: ObservableObject {
         let sprintSegments = computeSprintSegments(points)
         let staminaDrop = computeStaminaDropRate(buckets: timeSeries)
         let hrIntensity = UserProfileManager.shared.age.flatMap {
-            computeHeartRateIntensity(gpsPoints: points, age: $0)
+            computeHeartRateIntensity(gpsPoints: points, heartRateSamples: heartRateSamples, age: $0)
         }
         let agilityEvents = detectAgilityEventsFromGPS(points)
         let agilityScore: Int
@@ -937,12 +937,14 @@ class SessionDataManager: ObservableObject {
 
         for (i, range) in ranges.enumerated() {
             let points = SessionDataManager.slicedPoints(rawGPS.points, from: range.start, to: range.end)
-            guard let stats = SessionDataManager.computeSegmentStats(points: points) else { continue }
+            let heartRateSamples = HeartRateAnalysis.sliced(rawGPS.heartRateSamples, toRangeOf: points)
+            guard let stats = SessionDataManager.computeSegmentStats(
+                points: points, heartRateSamples: heartRateSamples
+            ) else { continue }
 
-            // 「セッション終了時点の心拍数」の定義に合わせ、このドリル区間内で心拍データが
-            // 入っている最後の点の値を使う（消費カロリーはセッション全体の累計値でしか記録されておらず、
-            // ドリルごとに正確な値を算出できないため、意図的に設定しない）
-            let segmentHeartRate = points.last(where: { $0.heartRate != nil })?.heartRate
+            // 平均心拍・最大心拍は saveSession が切り出した心拍の列から計算する（§25.4）。
+            // 消費カロリーはセッション全体の累計値でしか記録されておらず、
+            // ドリルごとに正確な値を算出できないため、意図的に設定しない
 
             let newSession = TrainingSession(
                 userId: original.userId,
@@ -956,14 +958,16 @@ class SessionDataManager: ObservableObject {
                 maxSpeed: stats.maxSpeed,
                 avgSpeed: stats.avgSpeed,
                 isFlipped: original.isFlipped,
-                heartRate: segmentHeartRate,
                 staminaDrop: stats.staminaDrop,
                 hrIntensityRatio: stats.hrIntensityRatio,
                 splitFromSessionId: original.id
             )
 
             // saveSession が GPS データから sprintCount / agility を再計算して確定させる
-            saveSession(newSession, gpsData: GPSData(sessionId: newSession.id, points: points))
+            saveSession(
+                newSession,
+                gpsData: GPSData(sessionId: newSession.id, points: points, heartRateSamples: heartRateSamples)
+            )
 
             // stale コピーを使わず、saveSession が確定させた最新の状態を sessions 配列から読み直してアップロードする
             guard let saved = sessions.first(where: { $0.id == newSession.id }) else { continue }
@@ -1533,7 +1537,9 @@ class SessionDataManager: ObservableObject {
                 if drop != nil { sessions[index].staminaDrop = drop; metricsChanged = true }
             }
             if needsHR, let age {
-                let ratio = Self.computeHeartRateIntensity(gpsPoints: gpsData.points, age: age)?.highIntensityRatio
+                let ratio = Self.computeHeartRateIntensity(
+                    gpsPoints: gpsData.points, heartRateSamples: gpsData.heartRateSamples, age: age
+                )?.highIntensityRatio
                 if ratio != nil { sessions[index].hrIntensityRatio = ratio; metricsChanged = true }
             }
             let sprintCount = Self.computeSprintSegments(gpsData.points).count

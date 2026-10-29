@@ -356,8 +356,10 @@ struct DrillSplitManualEditView: View {
 
     private func recomputeStats() {
         segmentStats = segments.map { segment in
-            SessionDataManager.computeSegmentStats(
-                points: SessionDataManager.slicedPoints(gpsData.points, from: segment.start, to: segment.end)
+            let points = SessionDataManager.slicedPoints(gpsData.points, from: segment.start, to: segment.end)
+            return SessionDataManager.computeSegmentStats(
+                points: points,
+                heartRateSamples: HeartRateAnalysis.sliced(gpsData.heartRateSamples, toRangeOf: points)
             )
         }
     }
