@@ -432,7 +432,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "FootballGPS-Watch-App-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "FootballGPS Watch App";
+				INFOPLIST_KEY_CFBundleDisplayName = FootballGPS;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "ワークアウトデータを記録するためにHealthKitを使用します";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトデータを保存するためにHealthKitを使用します";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "サッカー練習中のGPSトラッキングに位置情報を使用します";
@@ -472,7 +472,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "FootballGPS-Watch-App-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "FootballGPS Watch App";
+				INFOPLIST_KEY_CFBundleDisplayName = FootballGPS;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "ワークアウトデータを記録するためにHealthKitを使用します";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトデータを保存するためにHealthKitを使用します";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "サッカー練習中のGPSトラッキングに位置情報を使用します";
