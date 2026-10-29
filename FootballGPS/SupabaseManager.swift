@@ -43,12 +43,11 @@ class SupabaseManager {
 
     // MARK: - users テーブル
 
+    /// 表示名と生年月日はサーバーで使っていないため送らない（技術実装仕様書 §14.2）
     func upsertUser(_ profile: UserProfile) async throws {
         guard let userId = currentUserId else { return }
         let row = UserRow(
             id: userId,
-            displayName: profile.displayName,
-            birthDate: profile.birthDate.map { isoDateString($0) },
             gender: profile.gender?.rawValue
         )
         try await client.from("users").upsert(row).execute()
@@ -355,29 +354,12 @@ class SupabaseManager {
         return rows.first
     }
 
-    // MARK: - Private Helpers
-
-    private func isoDateString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f.string(from: date)
-    }
 
     // MARK: - Encodable Row Types
 
     private struct UserRow: Encodable {
         let id: UUID
-        let displayName: String
-        let birthDate: String?
         let gender: String?
-
-        enum CodingKeys: String, CodingKey {
-            case id
-            case displayName = "display_name"
-            case birthDate   = "birth_date"
-            case gender
-        }
     }
 
     private struct SessionSummaryRow: Encodable {
