@@ -233,6 +233,13 @@ enum MonthlyRecapEngine {
             .sorted { $0.date < $1.date }
     }
 
+    /// Statsタブのボタンに出す月。先月のまとめがあるときだけ返す（ボタンは翌月の終わりまで出す）。
+    /// それより前の月は「過去のまとめ」から見る
+    static func featuredMonth(in months: [RecapMonth], now: Date = Date()) -> RecapMonth? {
+        guard let latest = months.first, latest == RecapMonth(date: now).previous else { return nil }
+        return latest
+    }
+
     /// まとめを見られる月（終わった月で、対象のセッションが minimumSessions 回以上）。新しい順
     static func availableMonths(sessions: [TrainingSession], now: Date = Date()) -> [RecapMonth] {
         let current = RecapMonth(date: now)

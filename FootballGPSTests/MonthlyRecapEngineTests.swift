@@ -37,6 +37,16 @@ struct MonthlyRecapEngineTests {
         #expect(months == [RecapMonth(year: 2026, month: 8)])
     }
 
+    @Test func Statsタブのボタンは翌月の終わりまで出す() {
+        let august = RecapMonth(year: 2026, month: 8)
+        let months = [august, RecapMonth(year: 2026, month: 6)]
+        #expect(MonthlyRecapEngine.featuredMonth(in: months, now: date(2026, 9, 1)) == august)
+        #expect(MonthlyRecapEngine.featuredMonth(in: months, now: date(2026, 9, 30)) == august)
+        // 10月になったら、8月は「過去のまとめ」からだけ見る
+        #expect(MonthlyRecapEngine.featuredMonth(in: months, now: date(2026, 10, 1)) == nil)
+        #expect(MonthlyRecapEngine.featuredMonth(in: [], now: date(2026, 9, 1)) == nil)
+    }
+
     @Test func 五分未満のセッションは数えない() {
         let sessions = [
             session(date(2026, 8, 1)), session(date(2026, 8, 8)), session(date(2026, 8, 15), minutes: 4),

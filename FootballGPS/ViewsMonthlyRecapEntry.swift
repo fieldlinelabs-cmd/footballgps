@@ -55,40 +55,17 @@ struct MonthlyRecapEntrySection: View {
     @ObservedObject private var dataManager = SessionDataManager.shared
     @State private var presented: RecapMonth?
 
-    private var months: [RecapMonth] { MonthlyRecapEngine.availableMonths(sessions: dataManager.sessions) }
-
     var body: some View {
-        if let latest = months.first {
+        let months = MonthlyRecapEngine.availableMonths(sessions: dataManager.sessions)
+        let featured = MonthlyRecapEngine.featuredMonth(in: months)
+        if !months.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Button {
-                    presented = latest
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "sparkles.rectangle.stack.fill")
-                            .font(.title2)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(latest.title)のまとめを見る")
-                                .font(.headline)
-                            Text("1か月のサッカーをストーリーで振り返る")
-                                .font(.caption)
-                                .opacity(0.85)
-                        }
-                        Spacer()
-                        Image(systemName: "play.fill")
-                    }
-                    .foregroundStyle(.white)
-                    .padding()
-                    .background(
-                        LinearGradient(
-                            colors: [Color(red: 0.05, green: 0.40, blue: 0.22), Color(red: 0.02, green: 0.15, blue: 0.10)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ),
-                        in: RoundedRectangle(cornerRadius: 14)
-                    )
+                if let featured {
+                    featuredButton(featured)
                 }
-                .buttonStyle(.plain)
 
-                if months.count > 1 {
+                // ボタンに出した月より前の月があるとき、またはボタンの期限（翌月の終わり）が過ぎたとき
+                if months.count > 1 || featured == nil {
                     NavigationLink {
                         MonthlyRecapListView(months: months)
                     } label: {
@@ -100,6 +77,36 @@ struct MonthlyRecapEntrySection: View {
             .padding(.horizontal)
             .monthlyRecapPresenter(month: $presented)
         }
+    }
+
+    private func featuredButton(_ month: RecapMonth) -> some View {
+        Button {
+            presented = month
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles.rectangle.stack.fill")
+                    .font(.title2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(month.title)のまとめを見る")
+                        .font(.headline)
+                    Text("1か月のサッカーをストーリーで振り返る")
+                        .font(.caption)
+                        .opacity(0.85)
+                }
+                Spacer()
+                Image(systemName: "play.fill")
+            }
+            .foregroundStyle(.white)
+            .padding()
+            .background(
+                LinearGradient(
+                    colors: [Color(red: 0.05, green: 0.40, blue: 0.22), Color(red: 0.02, green: 0.15, blue: 0.10)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
