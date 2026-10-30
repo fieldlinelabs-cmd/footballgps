@@ -40,14 +40,18 @@ struct SettingsView: View {
                     HStack {
                         Spacer()
                         VStack(spacing: 8) {
+                            // 行の中にボタンが2つあるため .borderless にする。指定しないと行のどこを触っても
+                            // 両方が同時に反応し、生年月日のカレンダーを閉じたタップで写真の選択と削除が動く
                             PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                                 avatarView
                             }
+                            .buttonStyle(.borderless)
                             if profileManager.profile.avatarImageData != nil {
                                 Button("写真を削除", role: .destructive) {
                                     profileManager.removeAvatarImage()
                                 }
                                 .font(.caption)
+                                .buttonStyle(.borderless)
                             }
                         }
                         Spacer()
@@ -108,11 +112,13 @@ struct SettingsView: View {
                             PhotosPicker(selection: $selectedEmblemItem, matching: .images) {
                                 emblemView
                             }
+                            .buttonStyle(.borderless)
                             if profileManager.profile.teamEmblemImageData != nil {
                                 Button("エンブレムを削除", role: .destructive) {
                                     profileManager.removeTeamEmblemImage()
                                 }
                                 .font(.caption)
+                                .buttonStyle(.borderless)
                             }
                         }
                         Spacer()
