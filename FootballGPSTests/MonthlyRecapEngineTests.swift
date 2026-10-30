@@ -181,6 +181,15 @@ struct MonthlyRecapEngineTests {
         #expect(RecapTimeBand.band(forHour: 16) == .evening)
     }
 
+    @Test func 軌跡の間引きは点の数を上限までにし最初と最後の点を残す() {
+        let points = (0..<1001).map { CGPoint(x: Double($0), y: 0) }
+        let thinned = MonthlyRecapEngine.thinned(points, maxPoints: 100)
+        #expect(thinned.count == 100)
+        #expect(thinned.first == points.first)
+        #expect(thinned.last == points.last)
+        #expect(MonthlyRecapEngine.thinned(Array(points.prefix(50)), maxPoints: 100).count == 50)
+    }
+
     @Test func 月の前後() {
         #expect(RecapMonth(year: 2026, month: 1).previous == RecapMonth(year: 2025, month: 12))
         #expect(RecapMonth(year: 2026, month: 12).next == RecapMonth(year: 2027, month: 1))

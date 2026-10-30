@@ -204,6 +204,14 @@ struct RecapQuiz {
     let correctIndex: Int
 }
 
+/// その月で一番走行距離が長かったセッションの軌跡（走った距離の画面で早送りで描く。§27.9）
+struct LongestTrack {
+    let date: Date
+    let distance: Double
+    /// フィールド内の割合の位置（HeatmapGrid.normalizedPoints と同じ座標）。描画が重くならないよう間引いてある
+    let path: [CGPoint]
+}
+
 /// 日ごとに積み上がるヒートマップの1コマ（§27.7 B）
 struct HeatmapFrame {
     let day: Date
@@ -453,6 +461,28 @@ enum MonthlyRecapEngine {
         guard let last = rawFrames.last else { return nil }
         let maxValue = last.grid.flatMap { $0 }.max() ?? 0
         return rawFrames.map { HeatmapFrame(day: $0.day, grid: HeatmapGrid.normalized($0.grid, maxValue: maxValue)) }
+    }
+
+    /// その月で一番走行距離が長かったセッションの軌跡。フィールドの登録がないセッションは除く。
+    /// 点は最大 maxPoints 個に間引く。見つからなければ nil
+    @MainActor
+    static func longestTrack(_ sessions: [TrainingSession], maxPoints: Int = 500) -> LongestTrack? {
+        for session in sessions.sorted(by: { $0.totalDistance > $1.totalDistance }) {
+            guard let fieldId = session.fieldId,
+                  let field = FieldManager.shared.getField(by: fieldId),
+                  let gpsData = SessionDataManager.shared.getGPSData(for: session.id) else { continue }
+            let path = HeatmapGrid.normalizedPoints(gpsData.points, field: field, isFlipped: session.isFlipped)
+            guard path.count >= 2 else { continue }
+            return LongestTrack(date: session.date, distance: session.totalDistance, path: thinned(path, maxPoints: maxPoints))
+        }
+        return nil
+    }
+
+    /// 等間隔に間引く（最後の点は残す）
+    static func thinned(_ points: [CGPoint], maxPoints: Int) -> [CGPoint] {
+        guard points.count > maxPoints, maxPoints >= 2 else { return points }
+        let step = Double(points.count - 1) / Double(maxPoints - 1)
+        return (0..<maxPoints).map { points[Int((Double($0) * step).rounded())] }
     }
 
     /// その月で一番速かったスプリント。GPSの精度が低い記録とフィールドの登録がないセッションは除く。

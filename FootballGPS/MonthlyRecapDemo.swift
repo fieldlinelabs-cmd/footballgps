@@ -10,6 +10,13 @@
 import Foundation
 import CoreGraphics
 
+/// 開発者ツールで全画面に表示するためのまとめ（毎回新しく作るので、識別子も毎回変える）
+struct MonthlyRecapDemoItem: Identifiable {
+    let id = UUID()
+    let recap: MonthlyRecap
+    let preset: MonthlyRecapPreset
+}
+
 enum MonthlyRecapDemo {
     /// 先月を対象に、その前の月の記録も含めた2か月分の架空のセッションでまとめを作る。
     /// クイズ・継続・自己ベスト・最速のスプリント・積み上がるヒートマップがすべて出る内容にする
@@ -82,7 +89,18 @@ enum MonthlyRecapDemo {
             rows: rows, cols: cols
         )
 
-        return (recap, MonthlyRecapPreset(bestGrid: bestGrid, heatmapFrames: frames, sprintReplay: sprint))
+        // 一番走ったセッションの軌跡: 中盤を中心に動き回る、なめらかな架空の軌跡
+        // （MockData の点はばらばらに散らばっていて、実際のGPSのような連続した線にならないため）
+        let trackPath = (0..<500).map { i -> CGPoint in
+            let t = Double(i) / 500 * 2 * .pi * 6
+            let x = 0.5 + 0.28 * sin(t * 1.0) + 0.10 * sin(t * 3.7 + 1.0) + 0.05 * sin(t * 9.1)
+            let y = 0.5 + 0.30 * sin(t * 0.7 + 0.5) + 0.12 * sin(t * 2.9) + 0.04 * cos(t * 7.3)
+            return CGPoint(x: min(0.97, max(0.03, x)), y: min(0.97, max(0.03, y)))
+        }
+        let longest = recap.sessions.max { $0.totalDistance < $1.totalDistance }
+        let track = longest.map { LongestTrack(date: $0.date, distance: $0.totalDistance, path: trackPath) }
+
+        return (recap, MonthlyRecapPreset(bestGrid: bestGrid, heatmapFrames: frames, sprintReplay: sprint, longestTrack: track))
     }
 }
 #endif

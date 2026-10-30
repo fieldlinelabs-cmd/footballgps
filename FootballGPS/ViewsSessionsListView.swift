@@ -9,6 +9,8 @@ import SwiftUI
 import Combine
 
 struct SessionsListView: View {
+    /// 開いている月ごとのまとめ（§27.5）
+    @State private var recapMonth: RecapMonth?
     @ObservedObject private var dataManager = SessionDataManager.shared
     @ObservedObject private var connectivityService = PhoneWatchConnectivityService.shared
     @ObservedObject private var nativeAdManager = NativeAdManager.shared
@@ -25,6 +27,8 @@ struct SessionsListView: View {
                 }
             }
             .navigationTitle("My Sessions")
+            // 月ごとのまとめはリスト全体に付ける（カードに付けると、開いた瞬間に「見た」と記録されてカードと一緒に閉じる）
+            .monthlyRecapPresenter(month: $recapMonth)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -89,7 +93,7 @@ struct SessionsListView: View {
             if let latest = MonthlyRecapEngine.availableMonths(sessions: dataManager.sessions).first,
                !MonthlyRecapSeen.isViewed(latest) {
                 Section {
-                    MonthlyRecapUnseenCard()
+                    MonthlyRecapUnseenCard(month: latest) { recapMonth = $0 }
                 }
             }
             ForEach(dates, id: \.self) { date in

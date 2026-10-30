@@ -102,16 +102,27 @@ struct DebugTestView: View {
     @State private var showAlert = false
     @State private var alertMessage = ""
     #if DEBUG
-    @State private var demoRecap: (recap: MonthlyRecap, preset: MonthlyRecapPreset)?
+    @State private var demoItem: MonthlyRecapDemoItem?
     #endif
 
     var body: some View {
+        // 全画面の表示はリスト全体に付ける。リストの中の項目に付けると、項目が作り直されたときに
+        // 開いたばかりの表示が閉じてしまう（初回だけ一瞬で閉じる不具合があった、技術実装仕様書 §27.8）
+        debugList
+        #if DEBUG
+            .fullScreenCover(item: $demoItem) { item in
+                MonthlyRecapStoryView(recap: item.recap, preset: item.preset)
+            }
+        #endif
+    }
+
+    private var debugList: some View {
         List {
             #if DEBUG
             // 月ごとのまとめのサンプル（技術実装仕様書 §27.8）。架空のデータで再生し、実際のデータには保存しない
             Section {
                 Button {
-                    demoRecap = MonthlyRecapDemo.make()
+                    demoItem = MonthlyRecapDemo.make().map { MonthlyRecapDemoItem(recap: $0.recap, preset: $0.preset) }
                 } label: {
                     Label("サンプルでまとめを見る", systemImage: "sparkles.rectangle.stack.fill")
                 }
@@ -120,11 +131,6 @@ struct DebugTestView: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Text("月ごとのまとめ")
-            }
-            .fullScreenCover(isPresented: Binding(get: { demoRecap != nil }, set: { if !$0 { demoRecap = nil } })) {
-                if let demoRecap {
-                    MonthlyRecapStoryView(recap: demoRecap.recap, preset: demoRecap.preset)
-                }
             }
             #endif
 

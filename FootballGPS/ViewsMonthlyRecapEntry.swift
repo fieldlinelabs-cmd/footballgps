@@ -128,48 +128,34 @@ struct MonthlyRecapListView: View {
 
 // MARK: - Sessionsタブ（まだ見ていない最新の月があるときだけ）
 
+/// まだ見ていない最新の月のカード。まとめを開くと「見た」と記録されてカードがリストから消えるため、
+/// 全画面の表示はこのカードではなく、リストを持つ画面（SessionsListView）に付ける。
+/// カードに付けると、開いた瞬間にカードと一緒に表示も消えてしまう
 struct MonthlyRecapUnseenCard: View {
-    @ObservedObject private var dataManager = SessionDataManager.shared
-    @State private var presented: RecapMonth?
-    /// 見た直後にカードを消すため（UserDefaults の変化は監視されない）
-    @State private var refreshToken = 0
-
-    private var unseen: RecapMonth? {
-        _ = refreshToken
-        guard let latest = MonthlyRecapEngine.availableMonths(sessions: dataManager.sessions).first,
-              !MonthlyRecapSeen.isViewed(latest) else { return nil }
-        return latest
-    }
+    let month: RecapMonth
+    let onOpen: (RecapMonth) -> Void
 
     var body: some View {
-        Group {
-            if let month = unseen {
-                Button {
-                    presented = month
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "sparkles")
-                            .foregroundStyle(.yellow)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(month.title)のまとめができました")
-                                .font(.subheadline.bold())
-                            Text("タップして振り返る")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
+        Button {
+            onOpen(month)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.yellow)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(month.title)のまとめができました")
+                        .font(.subheadline.bold())
+                    Text("タップして振り返る")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
         }
-        .monthlyRecapPresenter(month: $presented)
-        .onChange(of: presented) { _, newValue in
-            if newValue == nil { refreshToken += 1 }
-        }
+        .buttonStyle(.plain)
     }
 }
 
