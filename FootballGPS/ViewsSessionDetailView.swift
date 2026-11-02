@@ -121,6 +121,21 @@ struct SessionDetailView: View {
         dataManager.sessions.first(where: { $0.id == session.id }) ?? session
     }
 
+    /// プロスタイル診断を、今のコートの向きとセッションのポジションで計算し直す
+    private func refreshStyleSync() {
+        guard let field = currentField else { return }
+        syncDiagnosis = SessionDataManager.computeStyleSync(
+            gpsData: gpsData,
+            field: field,
+            isFlipped: isFlipped,
+            position: displaySession.position,
+            positionSource: displaySession.positionSource,
+            sprintCount: sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count,
+            agilityTurnCount: displaySession.agilityTurnCount,
+            maxSpeed: displaySession.maxSpeed
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
@@ -604,33 +619,14 @@ struct SessionDetailView: View {
                     }
                 }
             }
-            if let field = currentField {
-                syncDiagnosis = SessionDataManager.computeStyleSync(
-                    gpsData: gpsData,
-                    field: field,
-                    isFlipped: isFlipped,
-                    sprintCount: sprintCnt,
-                    agilityTurnCount: displaySession.agilityTurnCount,
-                    maxSpeed: displaySession.maxSpeed
-                )
-            }
+            refreshStyleSync()
         }
         .onDisappear {
             isPlaying = false
         }
-        .onChange(of: isFlipped) { _, flipped in
-            if let field = currentField {
-                let cnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
-                syncDiagnosis = SessionDataManager.computeStyleSync(
-                    gpsData: gpsData,
-                    field: field,
-                    isFlipped: flipped,
-                    sprintCount: cnt,
-                    agilityTurnCount: displaySession.agilityTurnCount,
-                    maxSpeed: displaySession.maxSpeed
-                )
-            }
-        }
+        .onChange(of: isFlipped) { refreshStyleSync() }
+        .onChange(of: displaySession.position) { refreshStyleSync() }
+        .onChange(of: displaySession.positionSource) { refreshStyleSync() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { isPlaying = false }
         }

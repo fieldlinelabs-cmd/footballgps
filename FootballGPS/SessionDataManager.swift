@@ -356,15 +356,20 @@ class SessionDataManager: ObservableObject {
     /// プロスタイルを2段階で診断する
     /// - ステップ1: ヒートマップの空間類似度のみでポジション（カテゴリ）を判定
     /// - ステップ2: 判定済みポジション内のスタイルを、スタッツ類似度50% + サード滞在比率50%でタイプ判定
+    /// セッションに設定したポジションで、ステップ1の候補を絞る（docs/統計推移仕様書.md §5.6）。GK の手動設定は nil
     static func computeStyleSync(
         gpsData: GPSData,
         field: Field,
         isFlipped: Bool,
+        position sessionPosition: PlayingPosition?,
+        positionSource: PositionSource?,
         sprintCount: Int,
         agilityTurnCount: Int?,
         maxSpeed: Double
     ) -> StyleSyncDiagnosis? {
         guard !gpsData.points.isEmpty else { return nil }
+        let candidates = styleSyncCandidates(position: sessionPosition, positionSource: positionSource)
+        guard candidates?.isEmpty != true else { return nil }
 
         let userGrid    = computeHeatmapGrid(gpsData: gpsData, field: field, isFlipped: isFlipped)
         let userSprint  = min(Double(sprintCount) / 30.0, 1.0)
@@ -374,11 +379,11 @@ class SessionDataManager: ObservableObject {
 
         // ステップ1: ヒートマップ（空間類似度）のみでポジションを判定
         let spatialByStyle: [(style: ProStyle, spatialSim: Double)] = ProStyle.all.map { style in
-            let idealGrid = generateIdealHeatmap(style: style)
-            return (style, cosineSimilarity(userGrid, idealGrid))
+            (style, spatialSimilarity(userGrid, style: style))
         }
         let positionScoreByCategory = Dictionary(grouping: spatialByStyle, by: { $0.style.category })
             .mapValues { entries in entries.map(\.spatialSim).max() ?? 0 }
+            .filter { candidates?.contains($0.key) ?? true }
         guard let topCategory = positionScoreByCategory.max(by: { $0.value < $1.value }) else { return nil }
         let position = PositionSyncResult(category: topCategory.key, positionScore: topCategory.value * 100.0)
 
@@ -402,6 +407,17 @@ class SessionDataManager: ObservableObject {
             .sorted { $0.syncRate > $1.syncRate }
 
         return StyleSyncDiagnosis(position: position, typeResults: typeResults)
+    }
+
+    /// 診断のステップ1で選べるポジション。nil は全ポジション、空は診断しない（GK のスタイルがないため）。
+    /// WB はヒートマップで SB・WG と見分けられないので、自動の WB ルールで WB になった場合も2つに絞る
+    private static func styleSyncCandidates(
+        position: PlayingPosition?,
+        positionSource: PositionSource?
+    ) -> Set<PlayingPosition>? {
+        if position == .wb { return [.sb, .wg] }
+        guard positionSource == .manual, let position else { return nil }
+        return position == .gk ? [] : [position]
     }
 
     // MARK: - Position Estimation（docs/統計推移仕様書.md §5・§6）
@@ -452,7 +468,7 @@ class SessionDataManager: ObservableObject {
         let userGrid = computeHeatmapGrid(gpsData: gpsData, field: field, isFlipped: isFlipped)
         var scores: [PlayingPosition: Double] = [:]
         for style in ProStyle.all {
-            let sim = cosineSimilarity(userGrid, generateIdealHeatmap(style: style))
+            let sim = spatialSimilarity(userGrid, style: style)
             scores[style.category] = max(scores[style.category] ?? 0, sim)
         }
         for template in positionTemplates {
@@ -534,8 +550,54 @@ class SessionDataManager: ObservableObject {
         return grid
     }
 
+    /// 理想ヒートマップのアウトサイドの置き方
+    private enum IdealHeatmapSide {
+        case both   // 左右対称
+        case left   // 左サイドだけ
+        case right  // 右サイドだけ
+    }
+
+    /// MF の理想ヒートマップを左右にずらすマス数（フィールド幅の1割）
+    private static let midfielderShiftCols = 4.0
+
+    /// スタイルごとの理想ヒートマップ。計算結果は変わらないので一度だけ作る。
+    /// 選手は片側のサイドでプレーするため、SB・WG は左右で別の絵にする（左右対称だと中央が濃くなる）。
+    /// MF は左右どちらかに寄ってプレーする場合があるので、中央の絵に左右へずらした絵を加える
+    private static let idealHeatmapsByStyleId: [String: [[[Double]]]] = Dictionary(
+        uniqueKeysWithValues: ProStyle.all.map { style in
+            let heatmaps: [[[Double]]]
+            switch style.category {
+            case .sb, .wg:
+                heatmaps = [
+                    generateIdealHeatmap(style: style, side: .left),
+                    generateIdealHeatmap(style: style, side: .right)
+                ]
+            case .mf:
+                heatmaps = [
+                    generateIdealHeatmap(style: style),
+                    generateIdealHeatmap(style: style, shiftCols: -midfielderShiftCols),
+                    generateIdealHeatmap(style: style, shiftCols: midfielderShiftCols)
+                ]
+            default:
+                heatmaps = [generateIdealHeatmap(style: style)]
+            }
+            return (style.id, heatmaps)
+        }
+    )
+
+    /// スタイルの理想ヒートマップのうち、最も近いものとのコサイン類似度
+    private static func spatialSimilarity(_ userGrid: [[Double]], style: ProStyle) -> Double {
+        (idealHeatmapsByStyleId[style.id] ?? [])
+            .map { cosineSimilarity(userGrid, $0) }
+            .max() ?? 0
+    }
+
     /// スタイル定義から理想ヒートマップを生成
-    private static func generateIdealHeatmap(style: ProStyle) -> [[Double]] {
+    private static func generateIdealHeatmap(
+        style: ProStyle,
+        side: IdealHeatmapSide = .both,
+        shiftCols: Double = 0
+    ) -> [[Double]] {
         let gridRows = 28  // fy方向（row=0: 守備, row=27: 攻撃）
         let gridCols = 40  // fx方向（col=0: 左, col=39: 右）
         var grid = Array(repeating: Array(repeating: 0.0, count: gridCols), count: gridRows)
@@ -544,22 +606,31 @@ class SessionDataManager: ObservableObject {
         let defCenter = 4.5;  let midCenter = 13.5;  let attCenter = 22.5
         let sigmaRow = 2.0 + style.heatmapSpread * 6.0
         let sigmaCol = 3.0 + style.heatmapSpread * 8.0
-        let centerCol = 19.5  // フィールド横方向の中心
+        let centerCol = 19.5 + shiftCols  // フィールド横方向の中心
+        let leftCol   = 5.0  + shiftCols
+        let rightCol  = 34.0 + shiftCols
+        let defensiveOutsideRatio = style.defensiveLateralBias ?? style.lateralBias
 
         for r in 0..<gridRows {
             for c in 0..<gridCols {
                 let rD = Double(r); let cD = Double(c)
-                // 縦方向: ゾーン比率でガウス重み
-                let rowW = style.defensiveThird * exp(-pow(rD - defCenter, 2) / (2 * sigmaRow * sigmaRow))
-                         + style.middleThird    * exp(-pow(rD - midCenter, 2) / (2 * sigmaRow * sigmaRow))
-                         + style.attackingThird * exp(-pow(rD - attCenter, 2) / (2 * sigmaRow * sigmaRow))
-                // 横方向: lateralBiasをそのまま「アウトサイド質量比率」として使用（左右対称）
-                let outsideRatio = style.lateralBias
+                // 縦方向: ゾーン比率でガウス重み。守備サードだけ横方向の比率が変わることがあるので分けて持つ
+                let defW = style.defensiveThird * exp(-pow(rD - defCenter, 2) / (2 * sigmaRow * sigmaRow))
+                let upperW = style.middleThird    * exp(-pow(rD - midCenter, 2) / (2 * sigmaRow * sigmaRow))
+                           + style.attackingThird * exp(-pow(rD - attCenter, 2) / (2 * sigmaRow * sigmaRow))
+                // 横方向: lateralBiasをそのまま「アウトサイド質量比率」として使用
                 let ctrW  = exp(-pow(cD - centerCol, 2) / (2 * sigmaCol * sigmaCol))
-                let leftW = exp(-pow(cD - 5.0,       2) / (2 * sigmaCol * sigmaCol))
-                let rgtW  = exp(-pow(cD - 34.0,      2) / (2 * sigmaCol * sigmaCol))
-                let colW = (1.0 - outsideRatio) * ctrW + outsideRatio * (leftW + rgtW) / 2.0
-                grid[r][c] = rowW * colW
+                let leftW = exp(-pow(cD - leftCol,   2) / (2 * sigmaCol * sigmaCol))
+                let rgtW  = exp(-pow(cD - rightCol,  2) / (2 * sigmaCol * sigmaCol))
+                let outsideW: Double
+                switch side {
+                case .both:  outsideW = (leftW + rgtW) / 2.0
+                case .left:  outsideW = leftW
+                case .right: outsideW = rgtW
+                }
+                let defColW = (1.0 - defensiveOutsideRatio) * ctrW + defensiveOutsideRatio * outsideW
+                let upperColW = (1.0 - style.lateralBias) * ctrW + style.lateralBias * outsideW
+                grid[r][c] = defW * defColW + upperW * upperColW
             }
         }
         let mx = grid.flatMap { $0 }.max() ?? 1.0
@@ -567,7 +638,7 @@ class SessionDataManager: ObservableObject {
         return grid
     }
 
-    /// 推定専用テンプレートから理想ヒートマップを生成（横方向の重みは generateIdealHeatmap と同じ式）
+    /// 推定専用テンプレートから理想ヒートマップを生成（横方向の重みは generateIdealHeatmap の左右対称と同じ式）
     private static func generateTemplateHeatmap(_ template: PositionTemplate) -> [[Double]] {
         let gridRows = 28
         let gridCols = 40
@@ -1503,6 +1574,11 @@ class SessionDataManager: ObservableObject {
 
     private var isBackfilling = false
     private let backfillSprintProfileKey = "backfillSprintProfileKey"
+    private let backfillPositionEstimationVersionKey = "backfillPositionEstimationVersion"
+
+    /// ポジション推定に使う理想ヒートマップの版。形を変えたら上げると、
+    /// 次回起動時に全セッションの estimatedPosition を計算し直す（手動設定の position は変わらない）
+    private static let positionEstimationVersion = 1
 
     /// 速度の外れ値除去（技術実装仕様書 §1.8）のルールの版。ルールを変えたら上げると、
     /// 次回起動時に全セッションの最高速度・スプリント回数を計算し直す
@@ -1532,6 +1608,7 @@ class SessionDataManager: ObservableObject {
         // sprintCount・maxSpeed のズレは GPS データを読まないと分からないため、閾値のプロフィールか
         // 外れ値除去のルールが前回の一括計算から変わったときだけ全セッションを確認する
         let checkAllSprintCounts = UserDefaults.standard.string(forKey: backfillSprintProfileKey) != profileKey
+        let reestimateAllPositions = UserDefaults.standard.integer(forKey: backfillPositionEstimationVersionKey) != Self.positionEstimationVersion
 
         let ids = sessions.filter { !$0.isSupersededBySplit }.map(\.id)
         var processed = 0
@@ -1541,7 +1618,7 @@ class SessionDataManager: ObservableObject {
             let needsStamina = session.staminaDrop == nil
             let needsHR = session.hrIntensityRatio == nil && age != nil
             let needsHeights = hasField && (session.avgPositionHeight == nil || session.backPositionHeight == nil)
-            let needsEstimate = hasField && session.estimatedPosition == nil
+            let needsEstimate = hasField && (session.estimatedPosition == nil || reestimateAllPositions)
             let needsAccuracy = session.gpsAccuracyMedian == nil
             guard checkAllSprintCounts || needsStamina || needsHR || needsHeights || needsEstimate || needsAccuracy else { continue }
 
@@ -1602,6 +1679,7 @@ class SessionDataManager: ObservableObject {
 
         reapplyWingBackRule()
         UserDefaults.standard.set(profileKey, forKey: backfillSprintProfileKey)
+        UserDefaults.standard.set(Self.positionEstimationVersion, forKey: backfillPositionEstimationVersionKey)
         print("✅ 派生メトリクスの一括計算完了: \(processed)件")
     }
 

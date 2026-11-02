@@ -62,6 +62,24 @@ struct PositionEstimationTests {
         #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .mf)
     }
 
+    @Test(arguments: [0.05...0.2, 0.8...0.95])
+    func 片側のタッチライン沿いを自陣から中盤まで動くとSBと推定される(fx: ClosedRange<Double>) {
+        let data = gpsData(fx: fx, fy: 0.1...0.6)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .sb)
+    }
+
+    @Test(arguments: [0.05...0.2, 0.8...0.95])
+    func 片側のタッチライン沿いの敵陣にいるとWGと推定される(fx: ClosedRange<Double>) {
+        let data = gpsData(fx: fx, fy: 0.6...0.95)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .wg)
+    }
+
+    @Test(arguments: [0.3...0.45, 0.55...0.7])
+    func 中央から左右に少し寄った中盤にいるとMFと推定される(fx: ClosedRange<Double>) {
+        let data = gpsData(fx: fx, fy: 0.3...0.65)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .mf)
+    }
+
     @Test func コート入れ替えで向きが反映される() {
         let data = gpsData(fx: 0.4...0.6, fy: 0.75...0.92)
         // 入れ替えると敵陣ゴール前が自陣ゴール寄りになり、FW ではなくなる
@@ -79,6 +97,39 @@ struct PositionEstimationTests {
         for data in samples {
             #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) != .wb)
         }
+    }
+
+    private func diagnosis(_ data: GPSData, position: PlayingPosition?, source: PositionSource?) -> StyleSyncDiagnosis? {
+        SessionDataManager.computeStyleSync(
+            gpsData: data, field: field, isFlipped: false,
+            position: position, positionSource: source,
+            sprintCount: 5, agilityTurnCount: 10, maxSpeed: 6
+        )
+    }
+
+    @Test func 手動のポジションがヒートマップより優先され候補もそのポジションになる() throws {
+        let data = gpsData(fx: 0.4...0.6, fy: 0.2...0.8)
+        let result = try #require(diagnosis(data, position: .cb, source: .manual))
+        #expect(result.position.category == .cb)
+        #expect(result.typeResults.allSatisfy { $0.style.category == .cb })
+    }
+
+    @Test(arguments: [PositionSource.manual, .auto])
+    func WBの診断はSBかWGになる(source: PositionSource) throws {
+        let data = gpsData(fx: 0.4...0.6, fy: 0.2...0.8)
+        let result = try #require(diagnosis(data, position: .wb, source: source))
+        #expect([.sb, .wg].contains(result.position.category))
+    }
+
+    @Test func 手動のGKは診断しない() {
+        let data = gpsData(fx: 0.4...0.6, fy: 0.0...0.06)
+        #expect(diagnosis(data, position: .gk, source: .manual) == nil)
+    }
+
+    @Test func 自動のポジションはヒートマップの判定を変えない() throws {
+        let data = gpsData(fx: 0.4...0.6, fy: 0.2...0.8)
+        let result = try #require(diagnosis(data, position: .cb, source: .auto))
+        #expect(result.position.category == .mf)
     }
 
     @Test func フィールド内の点が60点未満なら推定も高さもnil() {

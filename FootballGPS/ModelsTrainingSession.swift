@@ -346,7 +346,8 @@ struct ProStyle: Identifiable {
     let defensiveThird: Double  // 守備サード目標比率 (0-1)
     let middleThird:    Double  // 中盤サード目標比率 (0-1)
     let attackingThird: Double  // 攻撃サード目標比率 (0-1)
-    let lateralBias:    Double  // 理想ヒートマップの左右対称アウトサイド質量比率 (0=完全に中央, 1=完全にアウトサイド)
+    let lateralBias:    Double  // 理想ヒートマップのアウトサイド質量比率 (0=完全に中央, 1=完全にアウトサイド)
+    var defensiveLateralBias: Double? = nil  // 守備サードだけ lateralBias と変えるスタイルの比率（偽サイドバック）
     let sprintTarget:   Double  // スプリント目標 (0-1, 基準30回)
     let agilityTarget:  Double  // アジリティ目標 (0-1, 基準50回)
     let maxSpeedTarget: Double  // 最高速度目標 (0-1, 基準8m/s)
@@ -404,7 +405,7 @@ struct ProStyle: Identifiable {
                  maxSpeedTarget: 0.75, heatmapSpread: 0.55),
         ProStyle(id: "false_sb",    name: "偽サイドバック",    category: .sb,
                  defensiveThird: 0.40, middleThird: 0.45, attackingThird: 0.15,
-                 lateralBias: 0.40, sprintTarget: 0.50, agilityTarget: 0.65,
+                 lateralBias: 0.50, defensiveLateralBias: 0.80, sprintTarget: 0.50, agilityTarget: 0.65,
                  maxSpeedTarget: 0.60, heatmapSpread: 0.55),
         ProStyle(id: "solid_sb",    name: "堅実型サイドバック", category: .sb,
                  defensiveThird: 0.55, middleThird: 0.35, attackingThird: 0.10,
