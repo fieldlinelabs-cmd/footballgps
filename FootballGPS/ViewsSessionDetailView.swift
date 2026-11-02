@@ -202,6 +202,10 @@ struct SessionDetailView: View {
         .sheet(isPresented: $showingPositionPicker) {
             PositionPickerSheet(session: displaySession)
         }
+        // 診断は統計タブに出るので、タブの中ではなく画面全体で変更を受ける
+        .onChange(of: isFlipped) { refreshStyleSync() }
+        .onChange(of: displaySession.position) { refreshStyleSync() }
+        .onChange(of: displaySession.positionSource) { refreshStyleSync() }
         // 見終わった後のインタースティシャル広告（広告仕様書§4.2.1）。一覧へ戻る・別タブへ切り替えで離れたときに判定する
         .onAppear { InterstitialAdManager.shared.detailDidAppear(sessionId: session.id) }
         .onDisappear { InterstitialAdManager.shared.detailDidDisappear(sessionId: session.id) }
@@ -624,9 +628,6 @@ struct SessionDetailView: View {
         .onDisappear {
             isPlaying = false
         }
-        .onChange(of: isFlipped) { refreshStyleSync() }
-        .onChange(of: displaySession.position) { refreshStyleSync() }
-        .onChange(of: displaySession.positionSource) { refreshStyleSync() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { isPlaying = false }
         }
