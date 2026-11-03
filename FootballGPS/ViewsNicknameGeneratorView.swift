@@ -228,7 +228,7 @@ struct NicknameGeneratorView: View {
         let thirdRatios: (defensive: Double, middle: Double, attacking: Double)
         if let fieldId = session.fieldId, let field = FieldManager.shared.getField(by: fieldId) {
             thirdRatios = SessionDataManager.computeThirdRatios(
-                gpsData: gpsData, field: field, isFlipped: session.isFlipped
+                gpsData: gpsData, field: field, orientation: session.courtOrientation
             )
         } else {
             thirdRatios = (0, 0, 0)

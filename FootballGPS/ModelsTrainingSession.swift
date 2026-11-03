@@ -31,6 +31,14 @@ struct TrainingSession: Identifiable, Codable {
     // コート入れ替え表示フラグ
     var isFlipped: Bool
 
+    // 後半の入れ替え: この時刻以降の点は isFlipped と逆の向きで扱う（nil = 入れ替えなし、機能仕様書 §9.4）
+    var courtSwitchDate: Date?
+
+    /// セッションのコートの向き。GPS 点をフィールドに置くときは必ずこれを使う
+    var courtOrientation: CourtOrientation {
+        CourtOrientation(isFlipped: isFlipped, switchDate: courtSwitchDate)
+    }
+
     // GPSデータへのパス（Cloud Storageに保存）
     var gpsDataPath: String?
 
@@ -65,6 +73,9 @@ struct TrainingSession: Identifiable, Codable {
 
     // このセッションがドリル分割によって作られた場合、分割元の結合セッションのid（nil = 分割で作られたものではない）
     var splitFromSessionId: String?
+
+    // ユーザーが書いた振り返り（機能仕様書 §9.7）。端末の中だけに保存し、サーバーには送らない
+    var reflection: SessionReflection?
 
     // ポジション（docs/統計推移仕様書.md §4）。position は集計・表示に使う値で、
     // .manual ならユーザーが選んだ値、.auto なら estimatedPosition に WB ルール（§5.3）を適用した値
@@ -107,6 +118,7 @@ struct TrainingSession: Identifiable, Codable {
         avgSpeed: Double = 0,
         sprintCount: Int? = nil,
         isFlipped: Bool = false,
+        courtSwitchDate: Date? = nil,
         gpsDataPath: String? = nil,
         heartRate: Double? = nil,
         maxHeartRate: Double? = nil,
@@ -119,6 +131,7 @@ struct TrainingSession: Identifiable, Codable {
         pendingSplitBreaks: [DrillBreakInterval]? = nil,
         supersededBySplit: Bool? = nil,
         splitFromSessionId: String? = nil,
+        reflection: SessionReflection? = nil,
         position: PlayingPosition? = nil,
         positionSource: PositionSource? = nil,
         estimatedPosition: PlayingPosition? = nil,
@@ -140,6 +153,7 @@ struct TrainingSession: Identifiable, Codable {
         self.avgSpeed = avgSpeed
         self.sprintCount = sprintCount
         self.isFlipped = isFlipped
+        self.courtSwitchDate = courtSwitchDate
         self.gpsDataPath = gpsDataPath
         self.heartRate = heartRate
         self.maxHeartRate = maxHeartRate
@@ -152,6 +166,7 @@ struct TrainingSession: Identifiable, Codable {
         self.pendingSplitBreaks = pendingSplitBreaks
         self.supersededBySplit = supersededBySplit
         self.splitFromSessionId = splitFromSessionId
+        self.reflection = reflection
         self.position = position
         self.positionSource = positionSource
         self.estimatedPosition = estimatedPosition
@@ -191,6 +206,89 @@ struct TrainingSession: Identifiable, Codable {
         if let activeCalories = activeCalories { dict["activeCalories"] = activeCalories }
 
         return dict
+    }
+}
+
+/// ユーザーが書いた振り返り（機能仕様書 §9.7）。記録に残らない条件を、すべて任意で残す。
+/// TrainingSession のフィールドに使うため、Watchアプリターゲットとも共有するこのファイルに置く
+struct SessionReflection: Codable, Equatable {
+    var opponent: OpponentLevel?
+    var result: MatchResult?
+    var condition: BodyCondition?
+    var weather: WeatherCondition?
+    var memo: String?
+
+    /// 保存する値。メモの前後の空白を除き、何も書かれていなければ nil
+    var normalized: SessionReflection? {
+        var copy = self
+        let trimmed = memo?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        copy.memo = trimmed.isEmpty ? nil : trimmed
+        let isEmpty = copy.opponent == nil && copy.result == nil
+            && copy.condition == nil && copy.weather == nil && copy.memo == nil
+        return isEmpty ? nil : copy
+    }
+
+    /// タグを1行で読める形に並べたもの
+    var tagLabels: [String] {
+        [
+            opponent.map { "相手: \($0.rawValue)" },
+            result?.rawValue,
+            condition.map { "体調: \($0.rawValue)" },
+            weather?.rawValue,
+        ].compactMap { $0 }
+    }
+}
+
+enum OpponentLevel: String, Codable, CaseIterable {
+    case weaker = "弱い"
+    case even = "同じくらい"
+    case stronger = "強い"
+}
+
+enum MatchResult: String, Codable, CaseIterable {
+    case win = "勝ち"
+    case draw = "引き分け"
+    case loss = "負け"
+}
+
+enum BodyCondition: String, Codable, CaseIterable {
+    case bad = "悪い"
+    case normal = "普通"
+    case good = "良い"
+}
+
+enum WeatherCondition: String, Codable, CaseIterable {
+    case sunny = "晴れ"
+    case cloudy = "曇り"
+    case rainy = "雨"
+    case windy = "風が強い"
+}
+
+/// コートの向き（機能仕様書 §9.4）。isFlipped は前半（入れ替えなしなら全体）の向きで、
+/// switchDate 以降の点はその逆の向きになる。切り出した点列でも同じ結果になるよう、位置は時刻で持つ
+struct CourtOrientation: Equatable {
+    var isFlipped: Bool
+    var switchDate: Date? = nil
+
+    /// その時刻の点を180度回転して扱うか
+    func isFlipped(at timestamp: Date) -> Bool {
+        guard let switchDate, timestamp >= switchDate else { return isFlipped }
+        return !isFlipped
+    }
+
+    /// 入れ替えの前と後に点列を分ける（入れ替えをまたいで線を引かないため）。空の側は含めない
+    func splitAtSwitch(_ points: [GPSPoint]) -> [[GPSPoint]] {
+        guard let switchDate else { return points.isEmpty ? [] : [points] }
+        let parts = [points.filter { $0.timestamp < switchDate }, points.filter { $0.timestamp >= switchDate }]
+        return parts.filter { !$0.isEmpty }
+    }
+
+    /// start〜end を切り出したセッションの向き。入れ替えが範囲の外なら、切り出した範囲の向きに固定する
+    func clipped(from start: Date, to end: Date) -> CourtOrientation {
+        guard let switchDate else { return self }
+        if switchDate <= start { return CourtOrientation(isFlipped: !isFlipped) }
+        if switchDate > end { return CourtOrientation(isFlipped: isFlipped) }
+        return self
     }
 }
 

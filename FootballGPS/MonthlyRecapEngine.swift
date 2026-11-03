@@ -210,6 +210,8 @@ struct LongestTrack {
     let distance: Double
     /// フィールド内の割合の位置（HeatmapGrid.normalizedPoints と同じ座標）。描画が重くならないよう間引いてある
     let path: [CGPoint]
+    /// 後半の入れ替えで向きが変わる点の位置。ここでは線をつながない
+    var breakIndex: Int? = nil
 }
 
 /// 日ごとに積み上がるヒートマップの1コマ（§27.7 B）
@@ -439,7 +441,7 @@ enum MonthlyRecapEngine {
             guard let fieldId = session.fieldId,
                   let field = FieldManager.shared.getField(by: fieldId),
                   let gpsData = SessionDataManager.shared.getGPSData(for: session.id) else { return [] }
-            return HeatmapGrid.normalizedPoints(gpsData.points, field: field, isFlipped: session.isFlipped)
+            return HeatmapGrid.dwellPoints(gpsData.points, field: field, orientation: session.courtOrientation)
         }
         guard !points.isEmpty else { return nil }
         return HeatmapGrid.compute(normalizedPoints: points, rows: rows, cols: cols)
@@ -458,7 +460,7 @@ enum MonthlyRecapEngine {
                 guard let fieldId = session.fieldId,
                       let field = FieldManager.shared.getField(by: fieldId),
                       let gpsData = SessionDataManager.shared.getGPSData(for: session.id) else { return [] }
-                return HeatmapGrid.normalizedPoints(gpsData.points, field: field, isFlipped: session.isFlipped)
+                return HeatmapGrid.dwellPoints(gpsData.points, field: field, orientation: session.courtOrientation)
             }
             guard !points.isEmpty else { continue }
             let raw = HeatmapGrid.rawGrid(normalizedPoints: points, rows: rows, cols: cols)
@@ -478,9 +480,18 @@ enum MonthlyRecapEngine {
             guard let fieldId = session.fieldId,
                   let field = FieldManager.shared.getField(by: fieldId),
                   let gpsData = SessionDataManager.shared.getGPSData(for: session.id) else { continue }
-            let path = HeatmapGrid.normalizedPoints(gpsData.points, field: field, isFlipped: session.isFlipped)
-            guard path.count >= 2 else { continue }
-            return LongestTrack(date: session.date, distance: session.totalDistance, path: thinned(path, maxPoints: maxPoints))
+            let parts = session.courtOrientation.splitAtSwitch(gpsData.points)
+                .map { HeatmapGrid.normalizedPoints($0, field: field, orientation: session.courtOrientation) }
+                .filter { !$0.isEmpty }
+            let total = parts.reduce(0) { $0 + $1.count }
+            guard total >= 2 else { continue }
+            let thinnedParts = parts.map { thinned($0, maxPoints: max(2, maxPoints * $0.count / total)) }
+            return LongestTrack(
+                date: session.date,
+                distance: session.totalDistance,
+                path: thinnedParts.flatMap { $0 },
+                breakIndex: thinnedParts.count > 1 ? thinnedParts[0].count : nil
+            )
         }
         return nil
     }
@@ -509,7 +520,7 @@ enum MonthlyRecapEngine {
                 let from = max(0, segment.startIndex - leadIn)
                 let to = min(points.count - 1, segment.endIndex + leadIn)
                 let slice = Array(points[from...to])
-                let path = HeatmapGrid.normalizedPoints(slice, field: field, isFlipped: session.isFlipped)
+                let path = HeatmapGrid.normalizedPoints(slice, field: field, orientation: session.courtOrientation)
                 // フィールドの外の点が除かれて数がずれた場合は、再生できないので使わない
                 guard path.count == slice.count, path.count >= 2 else { continue }
                 best = SprintReplay(

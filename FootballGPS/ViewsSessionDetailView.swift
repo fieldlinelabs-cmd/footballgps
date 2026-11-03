@@ -72,6 +72,15 @@ struct SessionDetailView: View {
     // ドリルの手動切り出し
     @State private var showManualSplit = false
 
+    // 後半の入れ替え
+    @State private var showCourtSwitchEditor = false
+
+    // 2回を比べる
+    @State private var showingCompare = false
+
+    // 振り返り
+    @State private var showingReflection = false
+
     // ドリル分割の復元
     @State private var showRestoreSplitConfirm = false
     @Environment(\.dismiss) private var dismiss
@@ -121,13 +130,24 @@ struct SessionDetailView: View {
         dataManager.sessions.first(where: { $0.id == session.id }) ?? session
     }
 
+    /// 2回を比べる画面の比較先の候補（フィールドが削除された記録は並べられないので除く）
+    private var compareCandidates: [TrainingSession] {
+        GrowthTrendEngine.comparisonCandidates(for: displaySession, in: dataManager.sessions)
+            .filter { $0.fieldId.flatMap { fieldManager.getField(by: $0) } != nil }
+    }
+
+    /// 今のコートの向き
+    private var courtOrientation: CourtOrientation {
+        CourtOrientation(isFlipped: isFlipped, switchDate: displaySession.courtSwitchDate)
+    }
+
     /// プロスタイル診断を、今のコートの向きとセッションのポジションで計算し直す
     private func refreshStyleSync() {
         guard let field = currentField else { return }
         syncDiagnosis = SessionDataManager.computeStyleSync(
             gpsData: gpsData,
             field: field,
-            isFlipped: isFlipped,
+            orientation: courtOrientation,
             position: displaySession.position,
             positionSource: displaySession.positionSource,
             sprintCount: sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count,
@@ -140,8 +160,15 @@ struct SessionDetailView: View {
         ScrollView {
             VStack(spacing: 12) {
                 // セッション情報ヘッダー
+                // 振り返りのシートが開いている間は別のシートを開けないので、シートを開くボタンを無効にする
                 sessionHeader
-                
+                    .disabled(showingReflection)
+
+                SessionReflectionCard(session: displaySession) {
+                    isPlaying = false
+                    showingReflection = true
+                }
+
                 // フィールド未紐付けの場合はピッカーを表示
                 if currentField == nil {
                     fieldPickerSection
@@ -167,6 +194,7 @@ struct SessionDetailView: View {
                                 heatmapView(field: field)
                             case 2:
                                 statisticsView(field: field)
+                                    .disabled(showingReflection)
                             default:
                                 EmptyView()
                             }
@@ -187,13 +215,14 @@ struct SessionDetailView: View {
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
+                    .disabled(showingReflection)
                     .accessibilityLabel("結果を共有")
                 }
             }
         }
         .sheet(isPresented: $showingShareCard) {
             if let field = currentField {
-                ShareCardSheet(data: shareCardData(), gpsData: gpsData, field: field, isFlipped: isFlipped)
+                ShareCardSheet(data: shareCardData(), gpsData: gpsData, field: field, orientation: courtOrientation)
             }
         }
         .sheet(isPresented: $showingFieldPicker) {
@@ -202,8 +231,31 @@ struct SessionDetailView: View {
         .sheet(isPresented: $showingPositionPicker) {
             PositionPickerSheet(session: displaySession)
         }
+        .sheet(isPresented: $showCourtSwitchEditor) {
+            if let field = currentField {
+                NavigationStack {
+                    CourtSwitchEditView(session: displaySession, gpsData: gpsData, field: field, isFlipped: isFlipped)
+                }
+            }
+        }
         // 診断は統計タブに出るので、タブの中ではなく画面全体で変更を受ける
+        .sheet(isPresented: $showingReflection) {
+            SessionReflectionSheet(session: displaySession)
+        }
+        .sheet(isPresented: $showingCompare) {
+            if let comparison = GrowthTrendEngine.defaultComparison(for: displaySession, candidates: compareCandidates) {
+                NavigationStack {
+                    SessionCompareView(
+                        session: displaySession,
+                        gpsData: gpsData,
+                        candidates: compareCandidates,
+                        initialComparison: comparison
+                    )
+                }
+            }
+        }
         .onChange(of: isFlipped) { refreshStyleSync() }
+        .onChange(of: displaySession.courtSwitchDate) { refreshStyleSync() }
         .onChange(of: displaySession.position) { refreshStyleSync() }
         .onChange(of: displaySession.positionSource) { refreshStyleSync() }
         // 見終わった後のインタースティシャル広告（広告仕様書§4.2.1）。一覧へ戻る・別タブへ切り替えで離れたときに判定する
@@ -426,7 +478,7 @@ struct SessionDetailView: View {
             FieldPositioningView(
                 gpsData: gpsData,
                 field: field,
-                isFlipped: isFlipped,
+                orientation: courtOrientation,
                 currentPointIndex: currentPointIndex,
                 sprintSegments: showSprints ? sprintSegments : []
             )
@@ -463,6 +515,7 @@ struct SessionDetailView: View {
                             .foregroundStyle(.orange)
                             .clipShape(Capsule())
                     }
+                    .disabled(showingReflection)
                 }
             }
             .padding(.horizontal)
@@ -479,6 +532,7 @@ struct SessionDetailView: View {
                         showRestoreSplitConfirm = true
                     }
                     .font(.caption2)
+                    .disabled(showingReflection)
                 }
                 .padding(.horizontal)
             } else if displaySession.pendingSplitBreaks == nil && !displaySession.isSupersededBySplit {
@@ -501,6 +555,7 @@ struct SessionDetailView: View {
                         showSplitDetectionResult = true
                     }
                     .font(.caption2)
+                    .disabled(showingReflection)
                 }
                 .padding(.horizontal)
             }
@@ -513,7 +568,7 @@ struct SessionDetailView: View {
                     session: displaySession,
                     gpsData: gpsData,
                     field: field,
-                    isFlipped: isFlipped,
+                    orientation: courtOrientation,
                     initialRanges: pendingDrillRanges,
                     onConfirmed: {
                         showManualSplit = false
@@ -653,12 +708,26 @@ struct SessionDetailView: View {
     
     private func heatmapView(field: Field) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            FieldHeatmapView(gpsData: gpsData, field: field, isFlipped: isFlipped)
+            FieldHeatmapView(gpsData: gpsData, field: field, orientation: courtOrientation)
                 .frame(height: 600)
             
             fieldControlsRow
-            
-            Text("赤い部分ほど長時間滞在したエリアです")
+
+            Button {
+                showingCompare = true
+            } label: {
+                Label("比べる", systemImage: "rectangle.split.2x1")
+                    .font(.subheadline)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6))
+                    .foregroundStyle(compareCandidates.isEmpty ? .secondary : .primary)
+                    .clipShape(Capsule())
+            }
+            .disabled(compareCandidates.isEmpty || showingReflection)
+            .padding(.horizontal)
+
+            Text("赤い部分ほど長くいたエリアです")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal)
@@ -778,45 +847,77 @@ struct SessionDetailView: View {
     // MARK: - Field Controls Row
 
     private var fieldControlsRow: some View {
-        HStack(spacing: 12) {
-            Button {
-                isFlipped.toggle()
-                dataManager.updateIsFlipped(for: session.id, isFlipped: isFlipped)
-            } label: {
-                Label(
-                    isFlipped ? "コート入れ替え ✓" : "コート入れ替え",
-                    systemImage: "arrow.left.arrow.right"
-                )
-                .font(.subheadline)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(isFlipped ? Color.blue.opacity(0.15) : Color(.systemGray6))
-                .foregroundStyle(isFlipped ? .blue : .primary)
-                .clipShape(Capsule())
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                courtFlipButton
+
+                Button {
+                    showingFieldPicker = true
+                } label: {
+                    Label("フィールドを変更", systemImage: "map")
+                        .font(.subheadline)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color(.systemGray6))
+                        .foregroundStyle(.primary)
+                        .clipShape(Capsule())
+                }
+
+                Spacer()
             }
 
-            Button {
-                showingFieldPicker = true
-            } label: {
-                Label("フィールドを変更", systemImage: "map")
-                    .font(.subheadline)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color(.systemGray6))
-                    .foregroundStyle(.primary)
-                    .clipShape(Capsule())
-            }
-
-            Spacer()
+            courtSwitchButton
         }
         .padding(.horizontal)
+        .disabled(showingReflection)
+    }
+
+    private var courtFlipButton: some View {
+        Button {
+            isFlipped.toggle()
+            dataManager.updateIsFlipped(for: session.id, isFlipped: isFlipped)
+        } label: {
+            Label(
+                isFlipped ? "コート入れ替え ✓" : "コート入れ替え",
+                systemImage: "arrow.left.arrow.right"
+            )
+            .font(.subheadline)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(isFlipped ? Color.blue.opacity(0.15) : Color(.systemGray6))
+            .foregroundStyle(isFlipped ? .blue : .primary)
+            .clipShape(Capsule())
+        }
+    }
+
+    /// 前半と後半で陣地が入れ替わった試合の、後半の開始位置を指定する（機能仕様書 §9.4）
+    private var courtSwitchButton: some View {
+        let switchOffset = displaySession.courtSwitchDate.flatMap { date in
+            gpsData.points.first.map { date.timeIntervalSince($0.timestamp) }
+        }
+        return Button {
+            isPlaying = false
+            showCourtSwitchEditor = true
+        } label: {
+            Label(
+                switchOffset.map { "前後半を設定 \(String(format: "%02d:%02d", Int($0) / 60, Int($0) % 60)) ✓" } ?? "前後半を設定",
+                systemImage: "arrow.triangle.2.circlepath"
+            )
+            .font(.subheadline)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(switchOffset != nil ? Color.blue.opacity(0.15) : Color(.systemGray6))
+            .foregroundStyle(switchOffset != nil ? .blue : .primary)
+            .clipShape(Capsule())
+        }
+        .disabled(totalDuration < CourtSwitchEditView.minHalfDuration * 2)
     }
     
     // MARK: - Statistics View
     
     private func statisticsView(field: Field) -> some View {
         let thirdRatios = SessionDataManager.computeThirdRatios(
-            gpsData: gpsData, field: field, isFlipped: isFlipped
+            gpsData: gpsData, field: field, orientation: courtOrientation
         )
         let staminaDrop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
         let sprintCnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count

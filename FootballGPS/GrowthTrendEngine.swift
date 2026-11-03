@@ -297,6 +297,26 @@ enum GrowthTrendEngine {
         )
     }
 
+    // MARK: - 2回を比べる（機能仕様書 §9.6）
+
+    /// 比較先の候補。集計対象のうち、自分以外でフィールドが紐付いたセッションを新しい順に返す
+    static func comparisonCandidates(for target: TrainingSession, in sessions: [TrainingSession]) -> [TrainingSession] {
+        PlayerDataEngine.eligibleSessions(sessions)
+            .filter { $0.id != target.id && $0.fieldId != nil }
+            .sorted { $0.date > $1.date }
+    }
+
+    /// 比較先の初期値。自分より前で同じポジションの最新を選ぶ。同じ元記録のドリルは、
+    /// 試合の前半と後半を比べることになるので選ばない。candidates は新しい順
+    static func defaultComparison(for target: TrainingSession, candidates: [TrainingSession]) -> TrainingSession? {
+        let earlier = candidates.filter { candidate in
+            candidate.date < target.date
+                && (target.splitFromSessionId == nil || candidate.splitFromSessionId != target.splitFromSessionId)
+        }
+        let samePosition = earlier.first { target.position == nil || $0.position == target.position }
+        return samePosition ?? earlier.first ?? candidates.first
+    }
+
     // MARK: - 今日の出来（§9）
 
     static let todayComparisonMinCount = 3

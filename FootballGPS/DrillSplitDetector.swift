@@ -111,6 +111,15 @@ enum DrillSplitDetector {
         return breaks
     }
 
+    /// 後半の開始位置の候補（先頭点からの経過秒）。記録の中ほど（25〜75%）で始まって終わる休憩のうち、
+    /// 一番長いものの終わりを返す。見つからなければ記録のちょうど真ん中
+    static func suggestedCourtSwitchOffset(breaks: [DrillBreakInterval], totalDuration: TimeInterval) -> TimeInterval {
+        let halftime = breaks
+            .filter { $0.startOffset >= totalDuration * 0.25 && $0.endOffset <= totalDuration * 0.75 }
+            .max { ($0.endOffset - $0.startOffset) < ($1.endOffset - $1.startOffset) }
+        return halftime?.endOffset ?? totalDuration / 2
+    }
+
     /// 休憩区間から、ドリル本編とみなせる区間（[start, end)）を返す。
     /// 休憩の直前直後にできる短すぎる断片（`minSegmentDuration`未満）は捨てる。
     static func segmentRanges(

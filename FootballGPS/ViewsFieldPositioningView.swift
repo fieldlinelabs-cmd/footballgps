@@ -12,7 +12,7 @@ import CoreLocation
 struct FieldPositioningView: View {
     let gpsData: GPSData
     let field: Field
-    let isFlipped: Bool
+    let orientation: CourtOrientation
     let currentPointIndex: Int
     var sprintSegments: [SprintSegment] = []
 
@@ -30,16 +30,20 @@ struct FieldPositioningView: View {
                 if !allPoints.isEmpty {
                     let keptIndex = min(currentPointIndex, allPoints.count - 1)
                     let boundaryIndex: Int? = keptIndex > 0 ? keptIndex : nil
+                    let switchIndex = courtSwitchIndex
 
                     if let boundaryIndex, allPoints.indices.contains(boundaryIndex) {
-                        if let keptPath = createPath(points: Array(allPoints[0...boundaryIndex])) {
+                        if let keptPath = createPath(points: Array(allPoints[0...boundaryIndex]), breakIndex: switchIndex) {
                             keptPath.stroke(Color.blue, lineWidth: 2)
                         }
                         if boundaryIndex < allPoints.count - 1,
-                           let tailPath = createPath(points: Array(allPoints[boundaryIndex...])) {
+                           let tailPath = createPath(
+                               points: Array(allPoints[boundaryIndex...]),
+                               breakIndex: switchIndex.map { $0 - boundaryIndex }
+                           ) {
                             tailPath.stroke(Color.gray.opacity(0.5), style: StrokeStyle(lineWidth: 2, dash: [4, 4]))
                         }
-                    } else if let fullPath = createPath(points: allPoints) {
+                    } else if let fullPath = createPath(points: allPoints, breakIndex: switchIndex) {
                         fullPath.stroke(Color.blue, lineWidth: 2)
                     }
                 }
@@ -124,21 +128,23 @@ struct FieldPositioningView: View {
         let offsetY = (size.height - drawHeight) / 2
 
         return gpsData.points.compactMap { point in
-            guard let fieldCoord = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else {
+            guard let coord = field.orientedCoordinate(of: point, orientation: orientation) else {
                 return nil
             }
 
-            // isFlipped の場合はフィールド中心を軸に180度回転 (x, y) → (width-x, length-y)
-            let fx = isFlipped ? field.dimensions.width  - fieldCoord.x : fieldCoord.x
-            let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
-
-            let x = offsetX + (fx / field.dimensions.width)  * drawWidth
-            let y = offsetY + (1.0 - fy / field.dimensions.length) * drawHeight
+            let x = offsetX + (coord.x / field.dimensions.width)  * drawWidth
+            let y = offsetY + (1.0 - coord.y / field.dimensions.length) * drawHeight
 
             return CGPoint(x: x, y: y)
         }
+    }
+
+    /// 変換後の軌跡で、後半の入れ替えの最初の点の位置（ここで線をつながない）
+    private var courtSwitchIndex: Int? {
+        guard let switchDate = orientation.switchDate else { return nil }
+        return gpsData.points.prefix { $0.timestamp < switchDate }
+            .filter { field.orientedCoordinate(of: $0, orientation: orientation) != nil }
+            .count
     }
     
     /// 描画枠の縦横比（横＝ゴールライン、縦＝タッチライン。登録画面で設定した4隅の位置関係のまま描く）
@@ -181,24 +187,25 @@ struct FieldPositioningView: View {
         guard segment.startIndex <= end else { return [] }
 
         return gpsData.points[segment.startIndex...end].compactMap { point in
-            guard let fieldCoord = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else { return nil }
-            let fx = isFlipped ? field.dimensions.width  - fieldCoord.x : fieldCoord.x
-            let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
+            guard let coord = field.orientedCoordinate(of: point, orientation: orientation) else { return nil }
             return CGPoint(
-                x: offsetX + (fx / field.dimensions.width)  * drawWidth,
-                y: offsetY + (1.0 - fy / field.dimensions.length) * drawHeight
+                x: offsetX + (coord.x / field.dimensions.width)  * drawWidth,
+                y: offsetY + (1.0 - coord.y / field.dimensions.length) * drawHeight
             )
         }
     }
 
-    private func createPath(points: [CGPoint]) -> Path? {
+    /// breakIndex の点の手前では線をつながない
+    private func createPath(points: [CGPoint], breakIndex: Int? = nil) -> Path? {
         guard !points.isEmpty else { return nil }
         var path = Path()
         path.move(to: points[0])
-        for point in points.dropFirst() {
-            path.addLine(to: point)
+        for (index, point) in points.enumerated().dropFirst() {
+            if index == breakIndex {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
         }
         return path
     }
@@ -289,7 +296,7 @@ struct FieldLinesView: Shape {
     FieldPositioningView(
         gpsData: MockData.generateMockGPSData(sessionId: "preview"),
         field: MockData.mockField,
-        isFlipped: false,
+        orientation: CourtOrientation(isFlipped: false),
         currentPointIndex: 0
     )
     .frame(height: 400)

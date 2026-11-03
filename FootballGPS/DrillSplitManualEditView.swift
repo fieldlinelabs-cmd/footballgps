@@ -13,7 +13,7 @@ struct DrillSplitManualEditView: View {
     let session: TrainingSession
     let gpsData: GPSData
     let field: Field
-    let isFlipped: Bool
+    let orientation: CourtOrientation
     /// 確定後に呼ばれる（呼び出し元の画面を閉じるため）
     let onConfirmed: () -> Void
 
@@ -37,14 +37,14 @@ struct DrillSplitManualEditView: View {
         session: TrainingSession,
         gpsData: GPSData,
         field: Field,
-        isFlipped: Bool,
+        orientation: CourtOrientation,
         initialRanges: [(start: TimeInterval, end: TimeInterval)],
         onConfirmed: @escaping () -> Void
     ) {
         self.session = session
         self.gpsData = gpsData
         self.field = field
-        self.isFlipped = isFlipped
+        self.orientation = orientation
         self.onConfirmed = onConfirmed
 
         // 自動検出の候補があればそれを初期状態にし、なければ全体を1本のドリルにする
@@ -128,7 +128,7 @@ struct DrillSplitManualEditView: View {
                 DrillSplitFieldMapView(
                     gpsData: gpsData,
                     field: field,
-                    isFlipped: isFlipped,
+                    orientation: orientation,
                     ranges: drillRanges,
                     breaks: restIntervals,
                     currentOffset: currentTime

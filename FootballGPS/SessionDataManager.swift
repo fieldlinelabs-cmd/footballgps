@@ -48,7 +48,10 @@ class SessionDataManager: ObservableObject {
     /// セッションを保存（sprintCount は GPS データから再計算して上書きする）
     func saveSession(_ session: TrainingSession, gpsData: GPSData) {
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            // 同じ記録が届き直しても、ユーザーが書いた振り返りは消さない
+            let reflection = session.reflection ?? sessions[index].reflection
             sessions[index] = session
+            sessions[index].reflection = reflection
         } else {
             sessions.append(session)
         }
@@ -317,21 +320,14 @@ class SessionDataManager: ObservableObject {
     static func computeThirdRatios(
         gpsData: GPSData,
         field: Field,
-        isFlipped: Bool
+        orientation: CourtOrientation
     ) -> (defensive: Double, middle: Double, attacking: Double) {
         var defensiveCount = 0
         var middleCount    = 0
         var attackingCount = 0
 
-        for point in gpsData.points {
-            guard let fieldCoord = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else { continue }
-
-            let fy = isFlipped
-                ? field.dimensions.length - fieldCoord.y
-                : fieldCoord.y
-
+        for coord in field.dwellCoordinates(of: gpsData.points, orientation: orientation) {
+            let fy = coord.y
             let length = field.dimensions.length
             if fy < length / 3 {
                 defensiveCount += 1
@@ -360,7 +356,7 @@ class SessionDataManager: ObservableObject {
     static func computeStyleSync(
         gpsData: GPSData,
         field: Field,
-        isFlipped: Bool,
+        orientation: CourtOrientation,
         position sessionPosition: PlayingPosition?,
         positionSource: PositionSource?,
         sprintCount: Int,
@@ -371,11 +367,11 @@ class SessionDataManager: ObservableObject {
         let candidates = styleSyncCandidates(position: sessionPosition, positionSource: positionSource)
         guard candidates?.isEmpty != true else { return nil }
 
-        let userGrid    = computeHeatmapGrid(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        let userGrid    = computeHeatmapGrid(gpsData: gpsData, field: field, orientation: orientation)
         let userSprint  = min(Double(sprintCount) / 30.0, 1.0)
         let userAgility = agilityTurnCount.map { min(Double($0) / 50.0, 1.0) }
         let userSpeed   = min(maxSpeed / 8.0, 1.0)
-        let userThirds  = computeThirdRatios(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        let userThirds  = computeThirdRatios(gpsData: gpsData, field: field, orientation: orientation)
 
         // ステップ1: ヒートマップ（空間類似度）のみでポジションを判定
         let spatialByStyle: [(style: ProStyle, spatialSim: Double)] = ProStyle.all.map { style in
@@ -422,7 +418,7 @@ class SessionDataManager: ObservableObject {
 
     // MARK: - Position Estimation（docs/統計推移仕様書.md §5・§6）
 
-    /// 推定・高さの計算に必要な、フィールド内の GPS 点の最小数（約1分）
+    /// 推定・高さの計算に必要な、フィールド内にいた秒数（dwellCoordinates の点は1秒に1つ）
     static let minPointsForPositionAnalysis = 60
 
     /// ポジション推定専用テンプレート（§5.2）。既存の generateIdealHeatmap は守備・中盤・攻撃の
@@ -440,32 +436,13 @@ class SessionDataManager: ObservableObject {
         PositionTemplate(position: .gk, rowCenters: [(1.0, 1.0)], sigmaRow: 1.8, lateralBias: 0.0, sigmaCol: 4.0),
     ]
 
-    /// isFlipped を反映したフィールド座標（x: 0〜width 左→右, y: 0〜length 守備→攻撃）。フィールド外の点も含む
-    private static func orientedFieldCoordinates(gpsData: GPSData, field: Field, isFlipped: Bool) -> [CGPoint] {
-        gpsData.points.compactMap { point in
-            guard let fc = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else { return nil }
-            return CGPoint(
-                x: isFlipped ? field.dimensions.width  - fc.x : fc.x,
-                y: isFlipped ? field.dimensions.length - fc.y : fc.y
-            )
-        }
-    }
-
-    private static func inFieldPointCount(_ coords: [CGPoint], field: Field) -> Int {
-        coords.filter {
-            (0...field.dimensions.width).contains($0.x) && (0...field.dimensions.length).contains($0.y)
-        }.count
-    }
-
     /// ヒートマップの空間類似度からポジションを推定する（§5.1）。WB は返さない。
     /// フィールド内の点が足りなければ nil
-    static func predictPosition(gpsData: GPSData, field: Field, isFlipped: Bool) -> PlayingPosition? {
-        let coords = orientedFieldCoordinates(gpsData: gpsData, field: field, isFlipped: isFlipped)
-        guard inFieldPointCount(coords, field: field) >= minPointsForPositionAnalysis else { return nil }
+    static func predictPosition(gpsData: GPSData, field: Field, orientation: CourtOrientation) -> PlayingPosition? {
+        let coords = field.dwellCoordinates(of: gpsData.points, orientation: orientation)
+        guard coords.count >= minPointsForPositionAnalysis else { return nil }
 
-        let userGrid = computeHeatmapGrid(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        let userGrid = computeHeatmapGrid(gpsData: gpsData, field: field, orientation: orientation)
         var scores: [PlayingPosition: Double] = [:]
         for style in ProStyle.all {
             let sim = spatialSimilarity(userGrid, style: style)
@@ -479,13 +456,13 @@ class SessionDataManager: ObservableObject {
     }
 
     /// ポジションの高さ（§6）。0% = 自陣ゴールライン、100% = 敵陣ゴールライン。
-    /// フィールド外の点は 0〜100% にクランプして含める。フィールド内の点が足りなければ nil
-    static func computePositionHeights(gpsData: GPSData, field: Field, isFlipped: Bool) -> (avg: Double, front: Double, back: Double)? {
-        let coords = orientedFieldCoordinates(gpsData: gpsData, field: field, isFlipped: isFlipped)
-        guard inFieldPointCount(coords, field: field) >= minPointsForPositionAnalysis else { return nil }
+    /// 長くいた場所ほど重く数える。フィールド内にいた時間が足りなければ nil
+    static func computePositionHeights(gpsData: GPSData, field: Field, orientation: CourtOrientation) -> (avg: Double, front: Double, back: Double)? {
+        let coords = field.dwellCoordinates(of: gpsData.points, orientation: orientation)
+        guard coords.count >= minPointsForPositionAnalysis else { return nil }
 
         let heights = coords
-            .map { min(max($0.y / field.dimensions.length, 0), 1) * 100 }
+            .map { $0.y / field.dimensions.length * 100 }
             .sorted()
         let avg = heights.reduce(0, +) / Double(heights.count)
         // 最大値・最小値だと GPS の誤差1点に引っ張られるため 95・5 パーセンタイル
@@ -522,7 +499,7 @@ class SessionDataManager: ObservableObject {
     private static func computeHeatmapGrid(
         gpsData: GPSData,
         field: Field,
-        isFlipped: Bool
+        orientation: CourtOrientation
     ) -> [[Double]] {
         let gridRows = 28  // fy方向（守備→攻撃）
         let gridCols = 40  // fx方向（左→右）
@@ -530,14 +507,9 @@ class SessionDataManager: ObservableObject {
         let sigma: Double = 1.5
         let kernelRadius  = 4
 
-        for point in gpsData.points {
-            guard let fc = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else { continue }
-            let fx = isFlipped ? field.dimensions.width  - fc.x : fc.x
-            let fy = isFlipped ? field.dimensions.length - fc.y : fc.y
-            let row = Int((fy / field.dimensions.length) * Double(gridRows)).clamped(to: 0..<gridRows)
-            let col = Int((fx / field.dimensions.width)  * Double(gridCols)).clamped(to: 0..<gridCols)
+        for coord in field.dwellCoordinates(of: gpsData.points, orientation: orientation) {
+            let row = Int((coord.y / field.dimensions.length) * Double(gridRows)).clamped(to: 0..<gridRows)
+            let col = Int((coord.x / field.dimensions.width)  * Double(gridCols)).clamped(to: 0..<gridCols)
             for dr in -kernelRadius...kernelRadius {
                 for dc in -kernelRadius...kernelRadius {
                     let r = row + dr; let c = col + dc
@@ -1031,6 +1003,12 @@ class SessionDataManager: ObservableObject {
                 points: points, heartRateSamples: heartRateSamples
             ) else { continue }
 
+            // 入れ替えが範囲の外なら、そのドリルの向きに固定する
+            let orientation = original.courtOrientation.clipped(
+                from: points.first?.timestamp ?? original.date,
+                to: points.last?.timestamp ?? original.date
+            )
+
             // 平均心拍・最大心拍は saveSession が切り出した心拍の列から計算する（§25.4）。
             // 消費カロリーはセッション全体の累計値でしか記録されておらず、
             // ドリルごとに正確な値を算出できないため、意図的に設定しない
@@ -1046,10 +1024,12 @@ class SessionDataManager: ObservableObject {
                 totalDistance: stats.totalDistance,
                 maxSpeed: stats.maxSpeed,
                 avgSpeed: stats.avgSpeed,
-                isFlipped: original.isFlipped,
+                isFlipped: orientation.isFlipped,
+                courtSwitchDate: orientation.switchDate,
                 staminaDrop: stats.staminaDrop,
                 hrIntensityRatio: stats.hrIntensityRatio,
-                splitFromSessionId: original.id
+                splitFromSessionId: original.id,
+                reflection: original.reflection
             )
 
             // saveSession が GPS データから sprintCount / agility を再計算して確定させる
@@ -1505,9 +1485,24 @@ class SessionDataManager: ObservableObject {
         refreshPositionMetrics(for: sessionId)
     }
 
+    /// ユーザーが書いた振り返りを保存する。何も書かれていなければ消す
+    func updateReflection(for sessionId: String, reflection: SessionReflection) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].reflection = reflection.normalized
+        persistSessions()
+    }
+
+    /// 後半の入れ替えの時刻を更新する（nil で解除）。向きが変わるのは updateIsFlipped と同じ
+    func updateCourtSwitchDate(for sessionId: String, date: Date?) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].courtSwitchDate = date
+        persistSessions()
+        refreshPositionMetrics(for: sessionId)
+    }
+
     // MARK: - Position（docs/統計推移仕様書.md §4・§5）
 
-    /// ポジションの推定結果と高さを、紐付いたフィールドと isFlipped から計算し直す（§5.5）。
+    /// ポジションの推定結果と高さを、紐付いたフィールドとコートの向きから計算し直す（§5.5）。
     /// .manual のセッションの position は変えない（estimatedPosition だけ更新する）。
     /// GPS データが読めない場合は何もしない
     func refreshPositionMetrics(for sessionId: String, gpsData providedGPSData: GPSData? = nil) {
@@ -1522,8 +1517,8 @@ class SessionDataManager: ObservableObject {
         var estimated: PlayingPosition?
         var heights: (avg: Double, front: Double, back: Double)?
         if let fieldId = session.fieldId, let field = FieldManager.shared.getField(by: fieldId) {
-            estimated = Self.predictPosition(gpsData: gpsData, field: field, isFlipped: session.isFlipped)
-            heights = Self.computePositionHeights(gpsData: gpsData, field: field, isFlipped: session.isFlipped)
+            estimated = Self.predictPosition(gpsData: gpsData, field: field, orientation: session.courtOrientation)
+            heights = Self.computePositionHeights(gpsData: gpsData, field: field, orientation: session.courtOrientation)
         }
         sessions[index].estimatedPosition = estimated
         sessions[index].avgPositionHeight = heights?.avg
@@ -1576,9 +1571,9 @@ class SessionDataManager: ObservableObject {
     private let backfillSprintProfileKey = "backfillSprintProfileKey"
     private let backfillPositionEstimationVersionKey = "backfillPositionEstimationVersion"
 
-    /// ポジション推定に使う理想ヒートマップの版。形を変えたら上げると、
-    /// 次回起動時に全セッションの estimatedPosition を計算し直す（手動設定の position は変わらない）
-    private static let positionEstimationVersion = 1
+    /// ポジション推定の版。理想ヒートマップの形か集計の基準を変えたら上げると、
+    /// 次回起動時に全セッションの estimatedPosition と高さを計算し直す（手動設定の position は変わらない）
+    private static let positionEstimationVersion = 2
 
     /// 速度の外れ値除去（技術実装仕様書 §1.8）のルールの版。ルールを変えたら上げると、
     /// 次回起動時に全セッションの最高速度・スプリント回数を計算し直す

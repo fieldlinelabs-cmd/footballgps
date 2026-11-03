@@ -334,7 +334,13 @@ struct TrackReplayView: View {
                         CGPoint(x: 20 + p.x * drawWidth, y: 20 + (1 - p.y) * drawHeight)
                     }
                     var path = Path()
-                    path.addLines(track.path[0...headIndex].map(point))
+                    for (index, p) in track.path[0...headIndex].map(point).enumerated() {
+                        if index == 0 || index == track.breakIndex {
+                            path.move(to: p)
+                        } else {
+                            path.addLine(to: p)
+                        }
+                    }
                     gc.stroke(path, with: .color(RecapPalette.lime.opacity(0.75)),
                               style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
                     // 描いている先端は光る点（描き終えたら消す）

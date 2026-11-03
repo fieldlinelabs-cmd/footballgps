@@ -26,9 +26,9 @@ struct PositionEstimationTests {
     )
 
     /// フィールド内の割合座標（fx: 左→右, fy: 自陣→敵陣）の範囲に、格子状に点を置く
-    private func gpsData(fx: ClosedRange<Double>, fy: ClosedRange<Double>, steps: Int = 12) -> GPSData {
+    private func gpsData(fx: ClosedRange<Double>, fy: ClosedRange<Double>, steps: Int = 12, startAt: TimeInterval = 0) -> GPSData {
         var points: [GPSPoint] = []
-        var t = 0.0
+        var t = startAt
         for i in 0..<steps {
             for j in 0..<steps {
                 let x = fx.lowerBound + (fx.upperBound - fx.lowerBound) * Double(i) / Double(steps - 1)
@@ -49,41 +49,41 @@ struct PositionEstimationTests {
 
     @Test func 自陣ゴール前だけにいるとGKと推定される() {
         let data = gpsData(fx: 0.4...0.6, fy: 0.0...0.06)
-        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .gk)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)) == .gk)
     }
 
     @Test func 敵陣ゴール前の中央にいるとFWと推定される() {
         let data = gpsData(fx: 0.4...0.6, fy: 0.75...0.92)
-        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .fw)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)) == .fw)
     }
 
     @Test func 中央を縦に広く動くとMFと推定される() {
         let data = gpsData(fx: 0.4...0.6, fy: 0.2...0.8)
-        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .mf)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)) == .mf)
     }
 
     @Test(arguments: [0.05...0.2, 0.8...0.95])
     func 片側のタッチライン沿いを自陣から中盤まで動くとSBと推定される(fx: ClosedRange<Double>) {
         let data = gpsData(fx: fx, fy: 0.1...0.6)
-        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .sb)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)) == .sb)
     }
 
     @Test(arguments: [0.05...0.2, 0.8...0.95])
     func 片側のタッチライン沿いの敵陣にいるとWGと推定される(fx: ClosedRange<Double>) {
         let data = gpsData(fx: fx, fy: 0.6...0.95)
-        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .wg)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)) == .wg)
     }
 
     @Test(arguments: [0.3...0.45, 0.55...0.7])
     func 中央から左右に少し寄った中盤にいるとMFと推定される(fx: ClosedRange<Double>) {
         let data = gpsData(fx: fx, fy: 0.3...0.65)
-        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == .mf)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)) == .mf)
     }
 
     @Test func コート入れ替えで向きが反映される() {
         let data = gpsData(fx: 0.4...0.6, fy: 0.75...0.92)
         // 入れ替えると敵陣ゴール前が自陣ゴール寄りになり、FW ではなくなる
-        let flipped = SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: true)
+        let flipped = SessionDataManager.predictPosition(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: true))
         #expect(flipped != .fw)
         #expect(flipped != nil)
     }
@@ -95,13 +95,13 @@ struct PositionEstimationTests {
             gpsData(fx: 0.0...1.0, fy: 0.0...1.0),
         ]
         for data in samples {
-            #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) != .wb)
+            #expect(SessionDataManager.predictPosition(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)) != .wb)
         }
     }
 
     private func diagnosis(_ data: GPSData, position: PlayingPosition?, source: PositionSource?) -> StyleSyncDiagnosis? {
         SessionDataManager.computeStyleSync(
-            gpsData: data, field: field, isFlipped: false,
+            gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false),
             position: position, positionSource: source,
             sprintCount: 5, agilityTurnCount: 10, maxSpeed: 6
         )
@@ -134,13 +134,13 @@ struct PositionEstimationTests {
 
     @Test func フィールド内の点が60点未満なら推定も高さもnil() {
         let data = gpsData(fx: 0.4...0.6, fy: 0.4...0.6, steps: 7) // 49点
-        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, isFlipped: false) == nil)
-        #expect(SessionDataManager.computePositionHeights(gpsData: data, field: field, isFlipped: false) == nil)
+        #expect(SessionDataManager.predictPosition(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)) == nil)
+        #expect(SessionDataManager.computePositionHeights(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)) == nil)
     }
 
     @Test func センターラインだけにいると高さは約50パーセント() throws {
         let data = gpsData(fx: 0.2...0.8, fy: 0.5...0.5)
-        let heights = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, isFlipped: false))
+        let heights = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)))
         #expect(abs(heights.avg - 50) < 1)
         #expect(abs(heights.front - 50) < 1)
         #expect(abs(heights.back - 50) < 1)
@@ -149,27 +149,26 @@ struct PositionEstimationTests {
     @Test func 最低線は前線から戻ってきた位置の5パーセンタイル() throws {
         // 敵陣寄り（80%）に多くいて、一部だけ自陣寄り（20%）まで戻った FW
         let forward = gpsData(fx: 0.4...0.6, fy: 0.8...0.8).points
-        let defending = gpsData(fx: 0.4...0.6, fy: 0.2...0.2, steps: 4).points
+        let defending = gpsData(fx: 0.4...0.6, fy: 0.2...0.2, steps: 4, startAt: Double(forward.count)).points
         let data = GPSData(sessionId: "s", points: forward + defending)
-        let heights = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, isFlipped: false))
+        let heights = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)))
         #expect(abs(heights.front - 80) < 1)
         #expect(abs(heights.back - 20) < 1)
     }
 
-    @Test func フィールド外の点は0から100パーセントにクランプされる() throws {
+    @Test func フィールドから離れた時間は高さに含めない() throws {
         let inside = gpsData(fx: 0.2...0.8, fy: 0.5...0.5).points
-        let outside = gpsData(fx: 0.2...0.8, fy: 1.3...1.3).points
+        let outside = gpsData(fx: 0.2...0.8, fy: 1.3...1.3, startAt: Double(inside.count)).points
         let data = GPSData(sessionId: "s", points: inside + outside)
-        let heights = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, isFlipped: false))
-        #expect(abs(heights.avg - 75) < 1)
-        #expect(abs(heights.front - 100) < 0.001)
-        #expect(abs(heights.back - 50) < 1)
+        let heights = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)))
+        #expect(abs(heights.avg - 50) < 1)
+        #expect(abs(heights.front - 50) < 1)
     }
 
     @Test func コート入れ替えで高さが反転する() throws {
         let data = gpsData(fx: 0.2...0.8, fy: 0.2...0.2)
-        let normal = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, isFlipped: false))
-        let flipped = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, isFlipped: true))
+        let normal = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: false)))
+        let flipped = try #require(SessionDataManager.computePositionHeights(gpsData: data, field: field, orientation: CourtOrientation(isFlipped: true)))
         #expect(abs(normal.avg - 20) < 1)
         #expect(abs(flipped.avg - 80) < 1)
     }
