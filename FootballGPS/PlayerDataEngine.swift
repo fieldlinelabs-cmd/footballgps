@@ -4,33 +4,16 @@
 //
 //  「プレイヤーデータ」機能（§22）の計算ロジック。
 //  新しい永続化ストアは持たず、既存の SessionDataManager.shared.sessions から
-//  レベル・比較カード・バッジの状態をすべて都度計算する。
+//  累計プレー時間・比較カード・バッジの状態をすべて都度計算する。
 
 import Foundation
 
-// MARK: - レベル・XP
+// MARK: - 累計プレー時間
 
 enum PlayerDataEngine {
-    /// 1セッションの獲得XP
-    static func sessionXP(_ session: TrainingSession) -> Int {
-        Int(session.totalDistance / 10) + (session.sprintCount ?? 0) * 5 + 20
-    }
-
-    static func totalXP(sessions: [TrainingSession]) -> Int {
-        eligibleSessions(sessions).reduce(0) { $0 + sessionXP($1) }
-    }
-
-    static func level(forXP xp: Int) -> Int {
-        xp / 1000 + 1
-    }
-
-    /// 現在のレベル内での獲得済みXP（0...999）
-    static func xpIntoCurrentLevel(_ xp: Int) -> Int {
-        xp % 1000
-    }
-
-    static func xpToNextLevel(_ xp: Int) -> Int {
-        1000 - xpIntoCurrentLevel(xp)
+    /// 累計プレー時間（秒）。バッジ判定と同じく eligibleSessions の対象のみを合計する。
+    static func totalPlayTime(sessions: [TrainingSession]) -> TimeInterval {
+        eligibleSessions(sessions).reduce(0) { $0 + $1.duration }
     }
 
     // MARK: - 比較カード
@@ -44,7 +27,7 @@ enum PlayerDataEngine {
         let recentAverageDuration: TimeInterval
     }
 
-    /// 平均・バッジ判定の対象とするセッション（5分未満・「平均から除外」指定は対象外）。
+    /// 平均・バッジ判定の対象とするセッション（5分未満・「集計から除外」指定は対象外）。
     /// 既存の統計表示（ViewsSessionDetailView等）と同じ基準。プレイヤーデータ機能の
     /// 全計算（比較カード・レーダーチャート・バッジ）はこのフィルタを通したセッションのみを使う。
     static func eligibleSessions(_ sessions: [TrainingSession]) -> [TrainingSession] {
