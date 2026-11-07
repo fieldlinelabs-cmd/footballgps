@@ -208,8 +208,8 @@ enum PlayerDataEngine {
         .general: [1, 5, 20, 35, 50],
     ]
     private static let sprintThresholds: [PlayerCategory: [Int]] = [
-        .youth:   [50, 200, 500, 1500],
-        .general: [50, 200, 400, 600],
+        .youth:   [30, 100, 250, 500],
+        .general: [20, 50, 100, 150],
     ]
 
     private static let categoryUnavailableReason = "選手カテゴリを設定すると挑戦できます"
@@ -255,7 +255,7 @@ enum PlayerDataEngine {
         }
 
         let longRunCount = sessions.filter { $0.totalDistance >= 5000 }.count
-        let sprinterCount = sessions.filter { ($0.sprintCount ?? 0) >= 20 }.count
+        let sprinterCount = sessions.filter { ($0.sprintCount ?? 0) >= 10 }.count
         let eliteCount = sessions.filter { overallScore(for: $0) >= 80 }.count
 
         let thresholds = goodSessionThresholds[category]!

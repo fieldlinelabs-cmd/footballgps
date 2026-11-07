@@ -25,7 +25,7 @@ struct RadarReferenceStatsView: View {
         guard let stats else { return [] }
         return [
             Row(label: "走力", unit: "m/分", currentMax: 130, percentiles: stats.distance),
-            Row(label: "スプリント", unit: "回/分", currentMax: 1.0, percentiles: stats.sprint),
+            Row(label: "スプリント", unit: "回/分", currentMax: 0.25, percentiles: stats.sprint),
             Row(label: "アジリティ", unit: "回/分", currentMax: 4.5, percentiles: stats.agility),
             Row(label: "高強度（自己指標、Max=100固定）", unit: "%", currentMax: 100, percentiles: stats.hrIntensity),
             Row(label: "最高速度", unit: "km/h", currentMax: 28.8, percentiles: kmhPercentiles(stats.maxSpeed))

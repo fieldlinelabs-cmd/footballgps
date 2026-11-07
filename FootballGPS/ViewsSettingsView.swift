@@ -169,6 +169,12 @@ struct SettingsView: View {
                         Label("数値の見方と着け方", systemImage: "ruler.fill")
                     }
 
+                    NavigationLink {
+                        SprintThresholdHelpView()
+                    } label: {
+                        Label("スプリントの基準", systemImage: "figure.run")
+                    }
+
                     Link(destination: URL(string: "https://example.com")!) {
                         Label("ヘルプ", systemImage: "questionmark.circle.fill")
                     }

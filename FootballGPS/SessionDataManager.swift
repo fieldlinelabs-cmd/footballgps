@@ -101,79 +101,40 @@ class SessionDataManager: ObservableObject {
         print("📊 総セッション数: \(sessions.count)")
     }
 
-    /// 年齢・性別に応じたスプリント開始閾値を返す（m/s）
+    /// 年齢・性別に応じたスプリント開始閾値を返す（m/s）。根拠は技術実装仕様書 §13.4
+    /// - 16〜39歳: プロの基準（男子 25km/h＝FIFA・Jリーグ、女子 23km/h＝FIFA女子W杯）
+    /// - 15歳以下: 育成年代の研究の最高速度 × プロと同じ割合
+    /// - 40歳以上: 地域のマスターズ大会の中央値の速さ × プロと同じ割合
+    /// 未設定は 25歳・男子扱い。表を変えたら sprintThresholdVersion を上げる
     static func sprintThreshold(age: Int?, gender: Gender?) -> Double {
-        let g = gender ?? .male
-        let a = age ?? 25
+        let kmh: Double
+        switch (gender ?? .male, age ?? 25) {
+        case (.female, ..<12):   kmh = 16.0
+        case (.female, 12):      kmh = 18.0
+        case (.female, 13..<16): kmh = 20.5
+        case (.female, 16..<40): kmh = 23.0
+        case (.female, 40..<50): kmh = 16.0
+        case (.female, 50..<60): kmh = 15.5
+        case (.female, 60..<70): kmh = 14.5
+        case (.female, _):       kmh = 13.0
 
-        switch (g, a) {
-        // 13歳未満は50代と同じ（技術実装仕様書 §13.4.0）
-        case (.female, ..<13):   return 3.89  // 14.0 km/h
-        case (.female, 13..<20): return 4.72  // 17.0 km/h
-        case (.female, 20..<40): return 4.72
-        case (.female, 40..<50): return 4.17  // 15.0 km/h
-        case (.female, 50..<60): return 3.89  // 14.0 km/h
-        case (.female, 60...):   return 3.33  // 12.0 km/h
-
-        case (_, ..<13):   return 4.44  // 16.0 km/h
-        case (_, 13..<20): return 5.56  // 20.0 km/h
-        case (_, 20..<40): return 5.56
-        case (_, 40..<50): return 5.00  // 18.0 km/h
-        case (_, 50..<60): return 4.44  // 16.0 km/h
-        case (_, 60...):   return 3.89  // 14.0 km/h
-
-        default: return 5.56
+        case (_, ..<12):   kmh = 16.0
+        case (_, 12):      kmh = 18.0
+        case (_, 13):      kmh = 19.5
+        case (_, 14..<16): kmh = 20.0
+        case (_, 16..<40): kmh = 25.0
+        case (_, 40..<50): kmh = 18.5
+        case (_, 50..<60): kmh = 17.5
+        case (_, 60..<70): kmh = 16.5
+        case (_, _):       kmh = 15.0
         }
+        return kmh / 3.6
     }
 
-    /// GPS データからスプリント回数を計算する
+    /// GPS データからスプリント回数を計算する。数え方はセッション詳細・一括再計算と同じ
+    /// `computeSprintSegments`（基準以上で走り始め、1秒以上続いたもの。Jリーグと同じ1秒）
     static func calculateSprintCount(from gpsData: GPSData) -> Int {
-        let sprintThreshold = sprintThreshold(
-            age: UserProfileManager.shared.age,
-            gender: UserProfileManager.shared.profile.gender
-        )
-        let sprintEndThreshold = sprintThreshold * 0.72
-        let minSprintDuration: TimeInterval = 2.0
-        let minSprintInterval: TimeInterval = 5.0
-
-        var count = 0
-        var isInSprint = false
-        var isInSprintCandidate = false
-        var candidateStartTime: Date? = nil
-        var lastSprintEndTime: Date? = nil
-
-        for point in removingSpeedSpikes(gpsData.points) {
-            let speed = point.speed
-            let timestamp = point.timestamp
-
-            if isInSprint {
-                if speed < sprintEndThreshold {
-                    isInSprint = false
-                    lastSprintEndTime = timestamp
-                }
-            } else if isInSprintCandidate {
-                if speed < sprintEndThreshold {
-                    isInSprintCandidate = false
-                    candidateStartTime = nil
-                } else if let start = candidateStartTime,
-                          timestamp.timeIntervalSince(start) >= minSprintDuration {
-                    isInSprint = true
-                    isInSprintCandidate = false
-                    count += 1
-                }
-            } else {
-                if speed >= sprintThreshold {
-                    let canStart = lastSprintEndTime == nil ||
-                        timestamp.timeIntervalSince(lastSprintEndTime!) >= minSprintInterval
-                    if canStart {
-                        isInSprintCandidate = true
-                        candidateStartTime = timestamp
-                    }
-                }
-            }
-        }
-
-        return count
+        computeSprintSegments(gpsData.points).count
     }
 
     // MARK: - 速度の外れ値除去（docs/技術実装仕様書.md §1.8）
@@ -187,6 +148,9 @@ class SessionDataManager: ObservableObject {
     ///    本物のスプリントは最高速度に近い速度が2点以上続くので残り、1点だけ高い値や、
     ///    上下にギザギザ揺れながら上がる誤読は消える。先頭・末尾は隣の点との低い方
     /// 2. 1 のあとも 38km/h を超える点（誤読が続いた場合）は、前後の上限以内の点で補う
+    /// 3. 1〜2点だけ前後より 5km/h 以上高い山のうち、GPS精度が悪い（10m以上）か、位置の移動から
+    ///    求めた速度と大きくずれる（30%以上）ものは誤読とみなし、前後の高い方の速度にする。
+    ///    1 の中央値では2点続く誤読は消えないため（実データで時速21km以上の大半がこれだった）
     /// 生データ（GPSファイル）は書き換えず、速度を使う計算の入口でこの関数を通す
     static func removingSpeedSpikes(_ points: [GPSPoint]) -> [GPSPoint] {
         guard points.count >= 2 else { return points }
@@ -207,6 +171,9 @@ class SessionDataManager: ObservableObject {
             speeds[i] = neighbors.isEmpty ? 0 : neighbors.reduce(0, +) / Double(neighbors.count)
         }
 
+        // 3. 2点まで続く誤読の山
+        removeShortUnreliablePeaks(&speeds, points: points)
+
         guard speeds != raw else { return points }
         return zip(points, speeds).map { point, speed in
             guard point.speed != speed else { return point }
@@ -219,6 +186,52 @@ class SessionDataManager: ObservableObject {
                 horizontalAccuracy: point.horizontalAccuracy,
                 heartRate: point.heartRate
             )
+        }
+    }
+
+    /// 山とみなす、前後の点との速度差（5km/h）
+    static let shortPeakMinJump: Double = 5.0 / 3.6
+    /// これ以上の GPS 精度（m）の点は、山の速度を信用しない
+    static let shortPeakPoorAccuracy: Double = 10.0
+    /// 位置の移動から求めた速度と GPS 速度のずれがこの割合以上なら、山の速度を信用しない
+    static let shortPeakMismatchRatio: Double = 0.3
+
+    /// removingSpeedSpikes の 3。speeds は 1・2 を済ませた速度で、points と同じ並び
+    private static func removeShortUnreliablePeaks(_ speeds: inout [Double], points: [GPSPoint]) {
+        guard speeds.count >= 3 else { return }
+        var i = 1
+        while i < speeds.count - 1 {
+            for length in 1...2 {
+                let end = i + length - 1
+                guard end < speeds.count - 1 else { continue }
+                let left = speeds[i - 1]
+                let right = speeds[end + 1]
+                let lowestInPeak = speeds[i...end].min() ?? 0
+                guard lowestInPeak - left >= shortPeakMinJump,
+                      lowestInPeak - right >= shortPeakMinJump else { continue }
+
+                let poorAccuracy = points[i...end].contains { $0.horizontalAccuracy >= shortPeakPoorAccuracy }
+                // 山の前後の点を含む区間で、位置の移動から求めた速度と GPS 速度を比べる
+                let from = i - 1, to = end + 1
+                let elapsed = points[to].timestamp.timeIntervalSince(points[from].timestamp)
+                var mismatch = false
+                if elapsed > 0 {
+                    var distance = 0.0
+                    for j in from..<to {
+                        let a = CLLocation(latitude: points[j].latitude, longitude: points[j].longitude)
+                        let b = CLLocation(latitude: points[j + 1].latitude, longitude: points[j + 1].longitude)
+                        distance += a.distance(from: b)
+                    }
+                    let implied = distance / elapsed
+                    let gps = speeds[from...to].reduce(0, +) / Double(to - from + 1)
+                    mismatch = abs(implied - gps) > shortPeakMismatchRatio * max(gps, 1)
+                }
+                guard poorAccuracy || mismatch else { continue }
+
+                for k in i...end { speeds[k] = max(left, right) }
+                break
+            }
+            i += 1
         }
     }
 
@@ -690,7 +703,7 @@ class SessionDataManager: ObservableObject {
 
         // 時間正規化メトリクス（分あたり実績 ÷ 分あたり参照値）
         let distanceScore  = min((totalDistance / minutes) / 130.0, 1.0)
-        let sprintScore    = min((Double(sprintCount) / minutes) / 1.0, 1.0)
+        let sprintScore    = min((Double(sprintCount) / minutes) / 0.25, 1.0)
         let agilityScore   = min((Double(agilityTurnCount ?? 0) / minutes) / 4.5, 1.0)
 
         // 時間非依存メトリクス
@@ -1577,11 +1590,11 @@ class SessionDataManager: ObservableObject {
 
     /// 速度の外れ値除去（技術実装仕様書 §1.8）のルールの版。ルールを変えたら上げると、
     /// 次回起動時に全セッションの最高速度・スプリント回数を計算し直す
-    private static let speedCleaningVersion = 2
+    private static let speedCleaningVersion = 3
 
     /// スプリント閾値の表（`sprintThreshold(age:gender:)`）の版。表を変えたら上げると、
     /// 年齢・性別が変わっていない利用者でも次回起動時に全セッションのスプリント回数を計算し直す
-    private static let sprintThresholdVersion = 2
+    private static let sprintThresholdVersion = 3
 
     /// 全セッションを確認し直す条件のキー。スプリント閾値を決めるプロフィール（年齢・性別）か、
     /// 速度の外れ値除去のルールが前回の一括計算から変わったら、全セッションの sprintCount・maxSpeed を確認し直す
