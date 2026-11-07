@@ -64,6 +64,7 @@ class SessionDataManager: ObservableObject {
         let count = SessionDataManager.calculateSprintCount(from: gpsData)
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index].sprintCount = count
+            sessions[index].highSpeedDistance = SessionDataManager.computeHighSpeedDistance(gpsData.points)
             // Watch が記録中に出した最高速度ではなく、外れ値を除いた速度から計算し直す（技術実装仕様書 §1.8）
             if !gpsData.points.isEmpty {
                 sessions[index].maxSpeed = SessionDataManager.cleanedMaxSpeed(gpsData.points)
@@ -665,68 +666,114 @@ class SessionDataManager: ObservableObject {
 
     // MARK: - Player Radar Analysis
 
-    /// 6軸評価からレーダーチャートデータとプレイヤータイプを計算
+    /// 4軸のレーダーチャートデータとプレイヤータイプを計算する（技術実装仕様書 §17.2、2026-11-08見直し）
     ///
-    /// 参照値:
-    ///   走力  : 130 m/分（実績参考集計P90=127.2 m/分ベース、2026-07-20見直し。旧100は90分換算の
-    ///           アマチュアサッカー研究値だったが、実際のトレーニングセッション（短時間・高強度）は
-    ///           試合平均より単位時間あたりの運動量が高く、旧値ではP50時点で頭打ちしていた）
-    ///   スプリント: 1.0 回/分（実績参考集計P90=0.86 回/分ベース、2026-07-20見直し。旧0.4は
-    ///           P50時点で既に超過し頭打ちしていた。判明当初は参考集計P90=0.33で妥当に見えたが、
-    ///           `session.sprintCount`（記録時点の古い年齢デフォルトの閾値で計算された値）を
-    ///           アップロードしていたバグが別途見つかり、現在の年齢基準の閾値で再計算した正しい値に
-    ///           修正した結果、実際のレートはこれより大幅に高いことが判明した）
-    ///   アジリティ: 4.5 回/分（実績参考集計P90=4.23 回/分ベース、2026-07-20見直し。旧3.0は
-    ///           P75時点で既に超過し頭打ちしていた）
-    ///   スタミナ : スタミナ低下率（時間非依存）
-    ///   高強度  : 高強度HR時間率 100%（時間非依存、2026-07-20見直し。旧40%はP50時点で2倍以上
-    ///           超過し常に頭打ちだった。高強度HR時間率は本人の推定最大心拍数に対する割合という
-    ///           「本人内で完結する相対指標」であり、走力・アジリティのような他者と比較可能な絶対量
-    ///           ではない（同じ運動量でも鍛えられた人ほど心拍は上がりにくい）。そのため他軸のように
-    ///           母集団の分布からMaxを較正するのではなく、指標が元々取りうる範囲の上限である100%を
-    ///           Maxとし、「自分がどれだけ追い込んだか」を測る軸として扱う）
-    ///   最高速度 : 8.0 m/s ≈ 29 km/h（時間非依存）
-    ///
-    /// 走力・アジリティの見直し根拠は`RadarReferenceStatsView`（開発者用参考画面）およびSupabase RPC
-    /// `get_radar_reference_stats()`の実績集計。2026-07-20時点ではn=6・単一ユーザーのみのサンプルで、
-    /// テスターが増え次第再確認が必要（詳細は§17.2）。
+    /// 値はすべて「45分あたり」に換算し、満点は世界トップの選手の最高値にする（プロと直接比べられるように）。
+    /// 短い練習は1分あたりの値が高く出やすいが、それは構わない（ユーザー決定）。
+    ///   走力      : 6,850m/45分（キミッヒ選手 1試合13.73km）
+    ///   高速ランニング: 630m/45分（プレミアリーグのサイドハーフ 1試合 1,049±106m の平均＋2SD）
+    ///   スプリント  : 33回/45分（Jリーグ 前田大然選手 1試合66回）
+    ///   最高速度    : 37.4km/h（プレミアリーグ公式記録 ファン・デ・フェン選手 37.38km/h）
     static func computePlayerRadar(
         totalDistance: Double,
         duration: TimeInterval,
+        highSpeedDistance: Double?,
         sprintCount: Int,
-        agilityTurnCount: Int?,
-        staminaDrop: Double?,
-        hrIntensityRatio: Double?,
         maxSpeed: Double
     ) -> PlayerRadarData {
-        let minutes = max(duration / 60.0, 1.0)
+        let halves = max(duration / 60.0, 1.0) / 45.0
+        let distancePer45  = totalDistance / halves
+        let highSpeedPer45 = (highSpeedDistance ?? 0) / halves
+        let sprintsPer45   = Double(sprintCount) / halves
+        let topSpeedKmh    = maxSpeed * 3.6
 
-        // 時間正規化メトリクス（分あたり実績 ÷ 分あたり参照値）
-        let distanceScore  = min((totalDistance / minutes) / 130.0, 1.0)
-        let sprintScore    = min((Double(sprintCount) / minutes) / 0.25, 1.0)
-        let agilityScore   = min((Double(agilityTurnCount ?? 0) / minutes) / 4.5, 1.0)
-
-        // 時間非依存メトリクス
-        let staminaScore   = min(staminaDrop ?? 0, 1.0)
-        let intensityScore = min((hrIntensityRatio ?? 0) / 100.0, 1.0)
-        let topSpeedScore  = min(maxSpeed / 8.0, 1.0)  // 8 m/s ≈ 29 km/h = 1.0
-
-        let scores: [Double] = [distanceScore, sprintScore, agilityScore, staminaScore, intensityScore, topSpeedScore]
+        let scores: [Double] = [
+            min(distancePer45 / RadarMax.distancePer45, 1.0),
+            min(highSpeedPer45 / RadarMax.highSpeedPer45, 1.0),
+            min(sprintsPer45 / RadarMax.sprintsPer45, 1.0),
+            min(topSpeedKmh / RadarMax.topSpeedKmh, 1.0),
+        ]
         let overall = scores.reduce(0, +) / Double(scores.count) * 100.0
-
-        let types: [PlayerType] = [.longRunner, .sprinter, .agile, .stamina, .hardWorker, .speedster]
+        let types: [PlayerType] = [.longRunner, .hardWorker, .sprinter, .speedster]
         let maxIdx = scores.indices.max(by: { scores[$0] < scores[$1] }) ?? 0
 
         return PlayerRadarData(
-            distance:     distanceScore,
-            sprint:       sprintScore,
-            agility:      agilityScore,
-            stamina:      staminaScore,
-            intensity:    intensityScore,
-            topSpeed:     topSpeedScore,
-            playerType:   types[maxIdx],
+            distance: scores[0],
+            highSpeed: scores[1],
+            sprint: scores[2],
+            topSpeed: scores[3],
+            distancePer45: distancePer45,
+            highSpeedPer45: highSpeedPer45,
+            sprintsPer45: sprintsPer45,
+            topSpeedKmh: topSpeedKmh,
+            playerType: types[maxIdx],
             overallScore: overall
         )
+    }
+
+    /// 保存済みのセッションの値からレーダーを計算する
+    static func computePlayerRadar(for session: TrainingSession) -> PlayerRadarData {
+        computePlayerRadar(
+            totalDistance: session.totalDistance,
+            duration: session.duration,
+            highSpeedDistance: session.highSpeedDistance,
+            sprintCount: session.sprintCount ?? 0,
+            maxSpeed: session.maxSpeed
+        )
+    }
+
+    /// レーダーの満点（世界トップの選手の最高値、45分あたり）。根拠は computePlayerRadar のコメントと §17.2
+    enum RadarMax {
+        static let distancePer45: Double = 6_850
+        static let highSpeedPer45: Double = 630
+        static let sprintsPer45: Double = 33
+        static let topSpeedKmh: Double = 37.4
+    }
+
+    // MARK: - 高速ランニング（§13.4.A）
+
+    /// 年齢・性別に応じた高速ランニングの基準（m/s）。16〜39歳は FIFA の区切り（男子 20km/h・女子 19km/h）。
+    /// ほかの年代はスプリントの基準と同じ速さに高速ランニングの割合（男子 53.2%・女子 55.4%）を掛けた値
+    static func highSpeedThreshold(age: Int?, gender: Gender?) -> Double {
+        let kmh: Double
+        switch (gender ?? .male, age ?? 25) {
+        case (.female, ..<12):   kmh = 12.5
+        case (.female, 12):      kmh = 14.5
+        case (.female, 13..<16): kmh = 17.5
+        case (.female, 16..<40): kmh = 19.0
+        case (.female, 40..<50): kmh = 13.5
+        case (.female, 50..<60): kmh = 13.0
+        case (.female, 60..<70): kmh = 12.0
+        case (.female, _):       kmh = 10.5
+
+        case (_, ..<12):   kmh = 12.5
+        case (_, 12):      kmh = 14.5
+        case (_, 13):      kmh = 15.5
+        case (_, 14..<16): kmh = 16.0
+        case (_, 16..<40): kmh = 20.0
+        case (_, 40..<50): kmh = 14.5
+        case (_, 50..<60): kmh = 14.0
+        case (_, 60..<70): kmh = 13.0
+        case (_, _):       kmh = 12.0
+        }
+        return kmh / 3.6
+    }
+
+    /// 高速ランニングの基準以上の速さで走った距離（m）。速度は外れ値を除いた値（§1.8）、距離は位置から計算する
+    static func computeHighSpeedDistance(_ rawPoints: [GPSPoint]) -> Double {
+        let points = removingSpeedSpikes(rawPoints)
+        guard points.count >= 2 else { return 0 }
+        let threshold = highSpeedThreshold(
+            age: UserProfileManager.shared.age,
+            gender: UserProfileManager.shared.profile.gender
+        )
+        var distance = 0.0
+        for i in 1..<points.count where points[i].speed >= threshold {
+            let a = CLLocation(latitude: points[i - 1].latitude, longitude: points[i - 1].longitude)
+            let b = CLLocation(latitude: points[i].latitude, longitude: points[i].longitude)
+            distance += a.distance(from: b)
+        }
+        return distance
     }
 
     // MARK: - AI監督フィードバック（§20.2）
@@ -1051,23 +1098,6 @@ class SessionDataManager: ObservableObject {
                 gpsData: GPSData(sessionId: newSession.id, points: points, heartRateSamples: heartRateSamples)
             )
 
-            // stale コピーを使わず、saveSession が確定させた最新の状態を sessions 配列から読み直してアップロードする
-            guard let saved = sessions.first(where: { $0.id == newSession.id }) else { continue }
-            let radar = SessionDataManager.computePlayerRadar(
-                totalDistance: saved.totalDistance,
-                duration: saved.duration,
-                sprintCount: saved.sprintCount ?? 0,
-                agilityTurnCount: saved.agilityTurnCount,
-                staminaDrop: saved.staminaDrop,
-                hrIntensityRatio: saved.hrIntensityRatio,
-                maxSpeed: saved.maxSpeed
-            )
-            do {
-                try await SupabaseManager.shared.uploadSessionSummary(saved, radar: radar)
-                print("✅ 分割セッションのSupabaseアップロード完了: id=\(saved.id)")
-            } catch {
-                print("❌ 分割セッションのSupabaseアップロード失敗: id=\(saved.id) error=\(error)")
-            }
         }
 
         if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
@@ -1628,32 +1658,35 @@ class SessionDataManager: ObservableObject {
             let needsHeights = hasField && (session.avgPositionHeight == nil || session.backPositionHeight == nil)
             let needsEstimate = hasField && (session.estimatedPosition == nil || reestimateAllPositions)
             let needsAccuracy = session.gpsAccuracyMedian == nil
-            guard checkAllSprintCounts || needsStamina || needsHR || needsHeights || needsEstimate || needsAccuracy else { continue }
+            let needsHighSpeed = session.highSpeedDistance == nil
+            guard checkAllSprintCounts || needsStamina || needsHR || needsHeights || needsEstimate || needsAccuracy || needsHighSpeed else { continue }
 
             // 12ヶ月分をまとめてメモリに載せないよう、LRU キャッシュには入れずに1件ずつ読む
             guard let gpsData = gpsDataCache[id] ?? loadGPSData(sessionId: id),
                   let index = sessions.firstIndex(where: { $0.id == id }) else { continue }
 
-            var metricsChanged = false
             if needsStamina {
                 let drop = Self.computeStaminaDropRate(buckets: Self.computeTimeSeries(gpsPoints: gpsData.points))
-                if drop != nil { sessions[index].staminaDrop = drop; metricsChanged = true }
+                if drop != nil { sessions[index].staminaDrop = drop }
             }
             if needsHR, let age {
                 let ratio = Self.computeHeartRateIntensity(
                     gpsPoints: gpsData.points, heartRateSamples: gpsData.heartRateSamples, age: age
                 )?.highIntensityRatio
-                if ratio != nil { sessions[index].hrIntensityRatio = ratio; metricsChanged = true }
+                if ratio != nil { sessions[index].hrIntensityRatio = ratio }
             }
             let sprintCount = Self.computeSprintSegments(gpsData.points).count
             if sessions[index].sprintCount != sprintCount {
                 sessions[index].sprintCount = sprintCount
-                metricsChanged = true
+            }
+            // 高速ランニングの基準もスプリントと同じく年齢・性別で決まるので、同じ条件で計算し直す
+            let highSpeed = Self.computeHighSpeedDistance(gpsData.points)
+            if sessions[index].highSpeedDistance.map({ abs($0 - highSpeed) > 0.01 }) ?? true {
+                sessions[index].highSpeedDistance = highSpeed
             }
             let maxSpeed = Self.cleanedMaxSpeed(gpsData.points)
             if !gpsData.points.isEmpty, abs(sessions[index].maxSpeed - maxSpeed) > 0.001 {
                 sessions[index].maxSpeed = maxSpeed
-                metricsChanged = true
             }
             if needsHeights || needsEstimate {
                 applyPositionMetrics(at: index, gpsData: gpsData)
@@ -1663,24 +1696,6 @@ class SessionDataManager: ObservableObject {
             }
             persistSessions()
 
-            if metricsChanged {
-                // 値型の古いコピーを送らないよう、更新後の sessions 配列から読み直してアップロードする
-                let updated = sessions[index]
-                let radar = Self.computePlayerRadar(
-                    totalDistance: updated.totalDistance,
-                    duration: updated.duration,
-                    sprintCount: updated.sprintCount ?? 0,
-                    agilityTurnCount: updated.agilityTurnCount,
-                    staminaDrop: updated.staminaDrop,
-                    hrIntensityRatio: updated.hrIntensityRatio,
-                    maxSpeed: updated.maxSpeed
-                )
-                do {
-                    try await SupabaseManager.shared.uploadSessionSummary(updated, radar: radar)
-                } catch {
-                    print("❌ 一括計算後のSupabaseアップロード失敗: id=\(updated.id) error=\(error)")
-                }
-            }
             processed += 1
             await Task.yield()
         }

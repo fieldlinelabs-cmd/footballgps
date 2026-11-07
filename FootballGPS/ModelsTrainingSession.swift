@@ -54,6 +54,8 @@ struct TrainingSession: Identifiable, Codable {
     // セッション詳細閲覧時に算出して永続化する派生メトリクス
     var staminaDrop: Double?      // 後半スタミナ低下率（0…1）
     var hrIntensityRatio: Double? // 高強度HR割合（0…100%）
+    // 高速ランニングの距離（m、§13.4.A の基準以上）。起動時の一括計算で埋める。nil = まだ計算していない
+    var highSpeedDistance: Double?
 
     // 自己平均から手動除外するフラグ（nil = false として扱う、旧データとの後方互換用）
     var excludeFromAverage: Bool?
@@ -531,26 +533,32 @@ struct StyleSyncDiagnosis {
     let typeResults: [StyleSyncResult]  // 判定済みポジション内のスタイルをスタッツ類似度降順でソート
 }
 
-/// プレイヤータイプ称号（最高スコア軸で決定）
+/// プレイヤータイプ称号（最高スコア軸で決定）。2026-11-08にレーダーを4軸にし、
+/// アジャイル型・スタミナ型をなくした。ハードワーカーは高速ランニングが一番高いときの称号
 enum PlayerType: String {
     case longRunner = "ロングランナー"
-    case sprinter   = "スプリンター"
-    case agile      = "アジャイル型"
-    case stamina    = "スタミナ型"
     case hardWorker = "ハードワーカー"
+    case sprinter   = "スプリンター"
     case speedster  = "スピードスター"
 }
 
-/// レーダーチャート用プレイヤー評価データ（非永続化）
+/// レーダーチャート用プレイヤー評価データ（非永続化、技術実装仕様書 §17.2）
 struct PlayerRadarData {
-    let distance:     Double  // 0…1  基準: 10km
-    let sprint:       Double  // 0…1  基準: 30回
-    let agility:      Double  // 0…1  基準: 50回
-    let stamina:      Double  // 0…1  基準: staminaDrop 1.0
-    let intensity:    Double  // 0…1  基準: 高強度HR 40%
-    let topSpeed:     Double  // 0…1  基準: 8 m/s（約29 km/h）
+    // 0…1（満点＝世界トップの選手の最高値、SessionDataManager.RadarMax）
+    let distance:  Double
+    let highSpeed: Double
+    let sprint:    Double
+    let topSpeed:  Double
+    // 45分あたりに換算した実際の値（最高速度は km/h）
+    let distancePer45:  Double
+    let highSpeedPer45: Double
+    let sprintsPer45:   Double
+    let topSpeedKmh:    Double
     let playerType:   PlayerType
-    let overallScore: Double  // 0…100（6軸平均）
+    let overallScore: Double  // 0…100（4軸平均）
+
+    /// レーダーの軸の順（走力・高速ランニング・スプリント・最高速度）の値
+    var axisValues: [Double] { [distance, highSpeed, sprint, topSpeed] }
 }
 
 // MARK: - AI監督フィードバック（§20）

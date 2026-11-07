@@ -293,15 +293,7 @@ enum MonthlyRecapEngine {
     // MARK: - 集計の部品
 
     private static func radar(for session: TrainingSession) -> PlayerRadarData {
-        SessionDataManager.computePlayerRadar(
-            totalDistance: session.totalDistance,
-            duration: session.duration,
-            sprintCount: session.sprintCount ?? 0,
-            agilityTurnCount: session.agilityTurnCount,
-            staminaDrop: session.staminaDrop,
-            hrIntensityRatio: session.hrIntensityRatio,
-            maxSpeed: session.maxSpeed
-        )
+        SessionDataManager.computePlayerRadar(for: session)
     }
 
     private static func bestMaxSpeed(_ sessions: [TrainingSession]) -> Double? {
@@ -423,8 +415,6 @@ enum MonthlyRecapEngine {
         switch playerType {
         case .longRunner: role = "ロングランナー"
         case .sprinter:   role = "スプリンター"
-        case .agile:      role = "キレ者"
-        case .stamina:    role = "鉄人"
         case .hardWorker: role = "ハードワーカー"
         case .speedster:  role = "スピードスター"
         }

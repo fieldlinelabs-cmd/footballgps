@@ -135,15 +135,7 @@ enum PlayerDataEngine {
     }
 
     private static func radar(for session: TrainingSession) -> PlayerRadarData {
-        SessionDataManager.computePlayerRadar(
-            totalDistance: session.totalDistance,
-            duration: session.duration,
-            sprintCount: session.sprintCount ?? 0,
-            agilityTurnCount: session.agilityTurnCount,
-            staminaDrop: session.staminaDrop,
-            hrIntensityRatio: session.hrIntensityRatio,
-            maxSpeed: session.maxSpeed
-        )
+        SessionDataManager.computePlayerRadar(for: session)
     }
 
     private static func overallScore(for session: TrainingSession) -> Double {
@@ -151,13 +143,12 @@ enum PlayerDataEngine {
     }
 
     private static func radarValues(for session: TrainingSession) -> [Double] {
-        let r = radar(for: session)
-        return [r.distance, r.sprint, r.agility, r.stamina, r.intensity, r.topSpeed]
+        radar(for: session).axisValues
     }
 
     // MARK: - レーダーチャート: 直近5回平均 vs 自己ベスト
 
-    static let radarAxisLabels = ["走力", "スプリント", "アジリティ", "スタミナ", "高強度", "最高速度"]
+    static let radarAxisLabels = RadarChartView.axisLabels
 
     struct RadarComparison {
         let recentAverage: [Double] // 直近5回（無ければあるだけ）の各軸平均
@@ -176,16 +167,18 @@ enum PlayerDataEngine {
         let latestValues = radarValues(for: sortedByRecent[0])
 
         func average(_ arrays: [[Double]]) -> [Double] {
-            var sums = [Double](repeating: 0, count: 6)
+            let axes = radarAxisLabels.count
+            var sums = [Double](repeating: 0, count: axes)
             for arr in arrays {
-                for i in 0..<6 { sums[i] += arr[i] }
+                for i in 0..<axes { sums[i] += arr[i] }
             }
             return sums.map { $0 / Double(arrays.count) }
         }
         func maxPerAxis(_ arrays: [[Double]]) -> [Double] {
-            var best = [Double](repeating: 0, count: 6)
+            let axes = radarAxisLabels.count
+            var best = [Double](repeating: 0, count: axes)
             for arr in arrays {
-                for i in 0..<6 { best[i] = max(best[i], arr[i]) }
+                for i in 0..<axes { best[i] = max(best[i], arr[i]) }
             }
             return best
         }

@@ -218,10 +218,8 @@ struct NicknameGeneratorView: View {
         let radar = SessionDataManager.computePlayerRadar(
             totalDistance: session.totalDistance,
             duration: session.duration,
+            highSpeedDistance: SessionDataManager.computeHighSpeedDistance(gpsData.points),
             sprintCount: sprintCnt,
-            agilityTurnCount: session.agilityTurnCount,
-            staminaDrop: staminaDrop,
-            hrIntensityRatio: hrIntensity?.highIntensityRatio,
             maxSpeed: session.maxSpeed
         )
 

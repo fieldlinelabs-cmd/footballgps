@@ -39,6 +39,8 @@ struct SessionDetailView: View {
 
     // スプリント区間（GPS速度から計算）
     @State private var sprintSegments: [SprintSegment] = []
+    /// 高速ランニングの距離（m）。今のプロフィールの基準で GPS から計算する（レーダー用）
+    @State private var highSpeedDistance: Double = 0
 
     // 時間帯別運動量（5分単位）
     @State private var timeSeries: [TimeSeriesBucket] = []
@@ -271,10 +273,8 @@ struct SessionDetailView: View {
         let radar = SessionDataManager.computePlayerRadar(
             totalDistance: displaySession.totalDistance,
             duration: displaySession.duration,
+            highSpeedDistance: highSpeedDistance,
             sprintCount: sprintCnt,
-            agilityTurnCount: displaySession.agilityTurnCount,
-            staminaDrop: SessionDataManager.computeStaminaDropRate(buckets: timeSeries),
-            hrIntensityRatio: hrIntensity?.highIntensityRatio,
             maxSpeed: displaySession.maxSpeed
         )
         return ShareCardData(
@@ -609,6 +609,7 @@ struct SessionDetailView: View {
             isPlaying = false
             currentTime = 0
             sprintSegments = SessionDataManager.computeSprintSegments(gpsData.points)
+            highSpeedDistance = SessionDataManager.computeHighSpeedDistance(gpsData.points)
             timeSeries = SessionDataManager.computeTimeSeries(gpsPoints: gpsData.points)
             heartRateSeries = HeartRateAnalysis.series(for: gpsData)
             heartRateSummary = HeartRateAnalysis.summarize(heartRateSeries, age: UserProfileManager.shared.age)
@@ -620,36 +621,15 @@ struct SessionDetailView: View {
             // sprintCount は記録時点の古い閾値で保存されている場合があるため、
             // staminaDrop計算済みかどうかに関わらず、現在の閾値で再計算した値とズレていれば同期する
             let sprintCnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
-            // 派生メトリクスが未保存なら算出して永続化し、Supabaseにアップロード（初回閲覧時）
+            // 派生メトリクスが未保存なら算出して永続化する（初回閲覧時）。
+            // Supabase への送信は 2026-11-08 にやめた（技術実装仕様書 §14）
             if displaySession.staminaDrop == nil {
-                let drop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
-                let hrRatio = hrIntensity?.highIntensityRatio
-                dataManager.updateComputedMetrics(for: session.id, staminaDrop: drop, hrIntensityRatio: hrRatio, sprintCount: sprintCnt)
-                let radar = SessionDataManager.computePlayerRadar(
-                    totalDistance: displaySession.totalDistance,
-                    duration: displaySession.duration,
-                    sprintCount: sprintCnt,
-                    agilityTurnCount: displaySession.agilityTurnCount,
-                    staminaDrop: drop,
-                    hrIntensityRatio: hrRatio,
-                    maxSpeed: displaySession.maxSpeed
+                dataManager.updateComputedMetrics(
+                    for: session.id,
+                    staminaDrop: SessionDataManager.computeStaminaDropRate(buckets: timeSeries),
+                    hrIntensityRatio: hrIntensity?.highIntensityRatio,
+                    sprintCount: sprintCnt
                 )
-                // session は値型のため updateComputedMetrics の変更を反映していない。
-                // staminaDrop/hrIntensityRatio/sprintCount は今計算した値を明示的に上書きしてからアップロードする。
-                // sprintCount は session.sprintCount（記録時点の古い閾値での値）ではなく、
-                // 現在のプロフィール（年齢・性別）の閾値で再計算した sprintCnt を使う（radar計算と同じ値に揃える）
-                var updatedSession = displaySession
-                updatedSession.staminaDrop = drop
-                updatedSession.hrIntensityRatio = hrRatio
-                updatedSession.sprintCount = sprintCnt
-                Task {
-                    do {
-                        try await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
-                        print("✅ Supabaseへの派生メトリクス再同期完了: id=\(updatedSession.id) duration=\(updatedSession.duration)")
-                    } catch {
-                        print("❌ Supabaseへの派生メトリクス再同期に失敗: id=\(updatedSession.id) error=\(error)")
-                    }
-                }
             } else if displaySession.sprintCount != sprintCnt {
                 // staminaDropは計算済みだが、sprintCountだけ古い閾値の値のまま残っているセッションを同期
                 dataManager.updateComputedMetrics(
@@ -658,25 +638,6 @@ struct SessionDetailView: View {
                     hrIntensityRatio: displaySession.hrIntensityRatio,
                     sprintCount: sprintCnt
                 )
-                let radar = SessionDataManager.computePlayerRadar(
-                    totalDistance: displaySession.totalDistance,
-                    duration: displaySession.duration,
-                    sprintCount: sprintCnt,
-                    agilityTurnCount: displaySession.agilityTurnCount,
-                    staminaDrop: displaySession.staminaDrop,
-                    hrIntensityRatio: displaySession.hrIntensityRatio,
-                    maxSpeed: displaySession.maxSpeed
-                )
-                var updatedSession = displaySession
-                updatedSession.sprintCount = sprintCnt
-                Task {
-                    do {
-                        try await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
-                        print("✅ Supabaseへの派生メトリクス再同期完了: id=\(updatedSession.id) duration=\(updatedSession.duration)")
-                    } catch {
-                        print("❌ Supabaseへの派生メトリクス再同期に失敗: id=\(updatedSession.id) error=\(error)")
-                    }
-                }
             }
             refreshStyleSync()
         }
@@ -924,10 +885,8 @@ struct SessionDetailView: View {
         let radar = SessionDataManager.computePlayerRadar(
             totalDistance: displaySession.totalDistance,
             duration: displaySession.duration,
+            highSpeedDistance: highSpeedDistance,
             sprintCount: sprintCnt,
-            agilityTurnCount: displaySession.agilityTurnCount,
-            staminaDrop: staminaDrop,
-            hrIntensityRatio: hrIntensity?.highIntensityRatio,
             maxSpeed: displaySession.maxSpeed
         )
 
@@ -1285,7 +1244,7 @@ struct TimelineChartSection: View {
                 Text(drop >= 0.85 ? "スタミナ維持: 後半も出力が安定しています" : "後半の運動量が前半比 \(pct)% に低下しています")
                     .font(.caption)
                     .fontWeight(.medium)
-                Text(drop >= 0.85 ? "前後半の走行量がほぼ同じ「スタミナ型」です" : "スタミナ強化でさらに終盤も走れるようになります")
+                Text(drop >= 0.85 ? "前後半の走行量がほぼ同じで、最後まで走れています" : "スタミナ強化でさらに終盤も走れるようになります")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -1684,46 +1643,28 @@ struct PlayerRadarSection: View {
     let radar: PlayerRadarData
     let sessions: [TrainingSession]
 
-    private let labels = ["走力", "スプリント", "アジリティ", "スタミナ", "高強度", "最高速度"]
-    private var values: [Double] {
-        [radar.distance, radar.sprint, radar.agility, radar.stamina, radar.intensity, radar.topSpeed]
+    private var values: [Double] { radar.axisValues }
+
+    /// 軸ごとの今回の値（45分あたり）。ラベルの説明に出す
+    private var valueTexts: [String] {
+        [
+            "\(Int(radar.distancePer45.rounded()))m",
+            "\(Int(radar.highSpeedPer45.rounded()))m",
+            String(format: "%.1f回", radar.sprintsPer45),
+            String(format: "%.1fkm/h", radar.topSpeedKmh),
+        ]
     }
 
-    // 案A: 研究ベースのアマチュア平均参照値（各軸のMax定数に対する割合、2026-07-20見直し）
-    // 走力130m/分・スプリント0.25/分・アジリティ4.5/分・スタミナ・HR高強度100%（自己指標）・最高速度8m/sを基準
-    // スプリントは2026-11-07に基準をプロ相当（年齢・性別別）へ変えたため、満点を宮市選手の水準（約0.22回/分）に、
-    // アマ平均を唯一の実データ（50代男性、新基準で約0.1回/分）からの暫定値0.1回/分にした（技術実装仕様書 §17.2）
-    // その他のアマ平均の絶対値（走力80m/分・アジリティ2.0回/分・高強度30%・最高速度21.6km/h）自体は
-    // 研究値のまま変更していない。Max定数の変更に合わせて比率のみ再計算した
-    private let referenceA: [Double] = [80.0 / 130.0, 0.1 / 0.25, 2.0 / 4.5, 0.30, 30.0 / 100.0, 0.75]
-
-    // 案C: 直近5回の自己平均（5分未満・手動除外は対象外）
+    // 直近5回の自己平均（5分未満・手動除外は対象外）
     private var personalAvg: [Double]? {
         let eligible = sessions
-            .filter { $0.duration >= 300 && !$0.isExcludedFromAverage }
+            .filter { $0.duration >= 300 && !$0.isExcludedFromAverage && !$0.isSupersededBySplit }
             .sorted { $0.date > $1.date }
             .prefix(5)
         guard eligible.count >= 2 else { return nil }
-        let radars = eligible.map { s in
-            SessionDataManager.computePlayerRadar(
-                totalDistance: s.totalDistance,
-                duration: s.duration,
-                sprintCount: s.sprintCount ?? 0,
-                agilityTurnCount: s.agilityTurnCount,
-                staminaDrop: s.staminaDrop,
-                hrIntensityRatio: s.hrIntensityRatio,
-                maxSpeed: s.maxSpeed
-            )
-        }
-        let n = Double(eligible.count)
-        return [
-            radars.map(\.distance).reduce(0, +) / n,
-            radars.map(\.sprint).reduce(0, +) / n,
-            radars.map(\.agility).reduce(0, +) / n,
-            radars.map(\.stamina).reduce(0, +) / n,
-            radars.map(\.intensity).reduce(0, +) / n,
-            radars.map(\.topSpeed).reduce(0, +) / n
-        ]
+        let radars = eligible.map { SessionDataManager.computePlayerRadar(for: $0).axisValues }
+        let n = Double(radars.count)
+        return (0..<RadarChartView.axisCount).map { i in radars.map { $0[i] }.reduce(0, +) / n }
     }
 
     var body: some View {
@@ -1747,9 +1688,9 @@ struct PlayerRadarSection: View {
 
             RadarChartView(
                 values: values,
-                labels: labels,
-                referenceA: referenceA,
-                personalAvg: personalAvg
+                labels: RadarChartView.axisLabels,
+                personalAvg: personalAvg,
+                valueTexts: valueTexts
             )
             .frame(height: 220)
 
@@ -1759,9 +1700,13 @@ struct PlayerRadarSection: View {
                 if personalAvg != nil {
                     RadarLegendItem(color: .green, dashed: false, label: "直近5回平均")
                 }
-                RadarLegendItem(color: .gray, dashed: true, label: "アマ平均(参考)")
             }
             .font(.caption2)
+
+            Text("45分あたりに換算した値です。満点は世界トップの選手の記録です。軸の名前をタップすると説明が出ます。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -1772,10 +1717,8 @@ struct PlayerRadarSection: View {
     private var typeIcon: String {
         switch radar.playerType {
         case .longRunner: return "figure.run"
-        case .sprinter:   return "bolt.fill"
-        case .agile:      return "arrow.triangle.turn.up.right.diamond.fill"
-        case .stamina:    return "battery.100"
         case .hardWorker: return "flame.fill"
+        case .sprinter:   return "bolt.fill"
         case .speedster:  return "hare.fill"
         }
     }
@@ -1783,16 +1726,19 @@ struct PlayerRadarSection: View {
     private var typeColor: Color {
         switch radar.playerType {
         case .longRunner: return .blue
-        case .sprinter:   return .orange
-        case .agile:      return .purple
-        case .stamina:    return .green
         case .hardWorker: return .red
+        case .sprinter:   return .orange
         case .speedster:  return .yellow
         }
     }
 }
 
+/// プレイヤーのレーダーチャート（技術実装仕様書 §17.2）。軸は走力・高速ランニング・スプリント・最高速度の4つで、
+/// 値はすべて45分あたり、満点は世界トップの選手の記録（SessionDataManager.RadarMax）
 struct RadarChartView: View {
+    static let axisLabels = ["走力", "高速ランニング", "スプリント", "最高速度"]
+    static var axisCount: Int { axisLabels.count }
+
     let values: [Double]
     let labels: [String]
     var valuesColor: Color = .blue
@@ -1800,62 +1746,52 @@ struct RadarChartView: View {
     var referenceAColor: Color = .gray
     var personalAvg: [Double]? = nil
     var personalAvgColor: Color = .green
+    /// 軸ごとの今回の値（表示用の文字列）。nil なら説明に出さない
+    var valueTexts: [String]? = nil
 
     @State private var selectedAxisIndex: Int? = nil
 
     private struct AxisDetail {
-        let maxLabel: String   // 軸端に常時表示するMAX値
-        let maxFull: String    // ツールチップに表示する満点の説明
+        let maxLabel: String   // 軸端に常時表示する満点
+        let maxFull: String    // 説明に出す満点の根拠
         let description: String
-        let reference: String
     }
 
     private let axisDetails: [AxisDetail] = [
         AxisDetail(
-            maxLabel: "130m/分",
-            maxFull: "130m/分（分速130m＝時速7.8km）",
-            description: "プレー中の総移動距離を時間で割った値。フィールドをどれだけ広くカバーできるかを示します。",
-            reference: "アマ平均 80m/分"
+            maxLabel: "6,850m",
+            maxFull: "45分で6,850m（キミッヒ選手が1試合で13.73km）",
+            description: "プレー中に走った距離を、45分あたりに換算した値。どれだけ動き続けられるかを示します。"
         ),
         AxisDetail(
-            maxLabel: "0.25回/分",
-            maxFull: "0.25回/分（90分で約22回。Jリーグのサイドの選手の水準）",
-            description: "年齢・性別ごとのスプリント基準（16〜39歳の男子は時速25km、女子は時速23kmで、プロと同じ）以上で1秒以上走った回数を、時間で割った値。爆発的なダッシュ力を示します。",
-            reference: "アマ平均 0.1回/分（暫定）"
+            maxLabel: "630m",
+            maxFull: "45分で630m（プレミアリーグのサイドハーフの上位の水準）",
+            description: "年齢・性別ごとの高速ランニングの基準（16〜39歳は男子 時速20km、女子 時速19km）以上の速さで走った距離を、45分あたりに換算した値。速いペースで何度も走れるかを示します。"
         ),
         AxisDetail(
-            maxLabel: "4.5回/分",
-            maxFull: "4.5回/分（60分で270回の方向転換）",
-            description: "GPS軌跡で60度以上の方向転換を5.4km/h以上の速度で行った回数を時間で割った値。切り返しの敏捷性を示します。",
-            reference: "アマ平均 2.0回/分"
+            maxLabel: "33回",
+            maxFull: "45分で33回（Jリーグ 前田大然選手が1試合で66回）",
+            description: "年齢・性別ごとのスプリントの基準（16〜39歳は男子 時速25km、女子 時速23km）以上で1秒以上走った回数を、45分あたりに換算した値。全力のダッシュを何回できるかを示します。"
         ),
         AxisDetail(
-            maxLabel: "低下なし",
-            maxFull: "後半の移動量 ÷ 前半の移動量 = 1.0（低下なし）",
-            description: "後半の移動量が前半と比べてどれだけ維持できているかを示します。1.0が低下なし、値が低いほど後半に疲労が出ています。",
-            reference: ""
-        ),
-        AxisDetail(
-            maxLabel: "100%",
-            maxFull: "最大心拍数の80%以上で動いた時間の割合（自分の頑張り度、100%が上限）",
-            description: "最大心拍数の80%以上で動いた時間の割合。他人との比較ではなく、自分がどれだけ追い込めたかを示す指標です。心拍データが必要です。",
-            reference: "アマ平均 30%"
-        ),
-        AxisDetail(
-            maxLabel: "28.8km/h",
-            maxFull: "28.8km/h",
-            description: "セッション中にGPSで記録した最高速度。スプリント能力の上限を示します。",
-            reference: "アマ平均 21.6km/h"
+            maxLabel: "37.4km/h",
+            maxFull: "時速37.4km（プレミアリーグ公式記録 ファン・デ・フェン選手）",
+            description: "セッション中にGPSで記録した最高速度。Apple Watchは約1秒ごとに位置を測るため、実際より低めに出ることがあります。"
         ),
     ]
 
-    private func hexagonPath(vals: [Double], cx: CGFloat, cy: CGFloat, r: CGFloat) -> Path {
+    private var axisTotal: Int { labels.count }
+
+    private func angle(_ i: Int) -> Double {
+        -Double.pi / 2 + Double(i) * 2 * Double.pi / Double(max(axisTotal, 1))
+    }
+
+    private func polygonPath(vals: [Double], cx: CGFloat, cy: CGFloat, r: CGFloat) -> Path {
         var path = Path()
-        for i in 0..<6 {
-            let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
+        for i in 0..<axisTotal {
             let v = i < vals.count ? max(0, min(vals[i], 1.0)) : 0
-            let pt = CGPoint(x: cx + CGFloat(cos(angle)) * r * CGFloat(v),
-                             y: cy + CGFloat(sin(angle)) * r * CGFloat(v))
+            let pt = CGPoint(x: cx + CGFloat(cos(angle(i))) * r * CGFloat(v),
+                             y: cy + CGFloat(sin(angle(i))) * r * CGFloat(v))
             if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
         }
         path.closeSubpath()
@@ -1871,41 +1807,39 @@ struct RadarChartView: View {
             ZStack {
                 Canvas { ctx, _ in
                     for level in stride(from: 0.25, through: 1.0, by: 0.25) {
-                        let ring = hexagonPath(
-                            vals: Array(repeating: Double(level), count: 6),
+                        let ring = polygonPath(
+                            vals: Array(repeating: Double(level), count: axisTotal),
                             cx: cx, cy: cy, r: radius
                         )
                         ctx.stroke(ring, with: .color(.gray.opacity(0.25)), lineWidth: 1)
                     }
-                    for i in 0..<6 {
-                        let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
+                    for i in 0..<axisTotal {
                         var path = Path()
                         path.move(to: CGPoint(x: cx, y: cy))
                         path.addLine(to: CGPoint(
-                            x: cx + CGFloat(cos(angle)) * radius,
-                            y: cy + CGFloat(sin(angle)) * radius
+                            x: cx + CGFloat(cos(angle(i))) * radius,
+                            y: cy + CGFloat(sin(angle(i))) * radius
                         ))
                         ctx.stroke(path, with: .color(.gray.opacity(0.25)), lineWidth: 1)
                     }
                     if let refA = referenceA {
-                        let path = hexagonPath(vals: refA, cx: cx, cy: cy, r: radius)
+                        let path = polygonPath(vals: refA, cx: cx, cy: cy, r: radius)
                         ctx.stroke(path, with: .color(referenceAColor.opacity(0.65)),
                                    style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
                     }
                     if let hist = personalAvg {
-                        let path = hexagonPath(vals: hist, cx: cx, cy: cy, r: radius)
+                        let path = polygonPath(vals: hist, cx: cx, cy: cy, r: radius)
                         ctx.fill(path, with: .color(personalAvgColor.opacity(0.12)))
                         ctx.stroke(path, with: .color(personalAvgColor.opacity(0.65)), lineWidth: 1.5)
                     }
-                    let dataPath = hexagonPath(vals: values, cx: cx, cy: cy, r: radius)
+                    let dataPath = polygonPath(vals: values, cx: cx, cy: cy, r: radius)
                     ctx.fill(dataPath, with: .color(valuesColor.opacity(0.25)))
                     ctx.stroke(dataPath, with: .color(valuesColor.opacity(0.75)), lineWidth: 2)
                 }
 
-                // タップ可能なラベル（軸名 + MAX値を常時表示）
-                ForEach(0..<min(6, labels.count), id: \.self) { i in
-                    let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
-                    let lr    = radius + 26
+                // タップ可能なラベル（軸名 + 満点を常時表示）
+                ForEach(0..<axisTotal, id: \.self) { i in
+                    let lr = radius + 26
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             selectedAxisIndex = selectedAxisIndex == i ? nil : i
@@ -1926,8 +1860,8 @@ struct RadarChartView: View {
                     }
                     .buttonStyle(.plain)
                     .position(
-                        x: cx + CGFloat(cos(angle)) * lr,
-                        y: cy + CGFloat(sin(angle)) * lr
+                        x: cx + CGFloat(cos(angle(i))) * lr,
+                        y: cy + CGFloat(sin(angle(i))) * lr
                     )
                 }
 
@@ -1956,14 +1890,23 @@ struct RadarChartView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        HStack(spacing: 4) {
-                            Text("満点（100%）")
+                        if let valueTexts, idx < valueTexts.count {
+                            HStack(spacing: 4) {
+                                Text("今回")
+                                    .font(.caption2.bold())
+                                Text(valueTexts[idx])
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                        HStack(alignment: .top, spacing: 4) {
+                            Text("満点")
                                 .font(.caption2.bold())
-                                .foregroundStyle(.orange)
                             Text(detail.maxFull)
                                 .font(.caption2)
-                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
+                        .foregroundStyle(.orange)
                         .padding(.vertical, 3)
                         .padding(.horizontal, 6)
                         .background(Color.orange.opacity(0.1))
@@ -1972,16 +1915,6 @@ struct RadarChartView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        if !detail.reference.isEmpty {
-                            HStack(spacing: 4) {
-                                Text("アマ平均：")
-                                    .font(.caption2.bold())
-                                    .foregroundStyle(.blue)
-                                Text(detail.reference)
-                                    .font(.caption2)
-                                    .foregroundStyle(.blue)
-                            }
-                        }
                     }
                     .padding(12)
                     .background(Color(.systemBackground))

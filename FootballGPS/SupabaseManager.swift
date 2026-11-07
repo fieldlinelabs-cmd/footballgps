@@ -26,7 +26,9 @@ class SupabaseManager {
 
     // MARK: - Auth
 
-    /// 匿名認証を保証し、UserProfileManager のIDを同期する（§14.3.2）
+    /// 匿名認証を保証し、UserProfileManager のIDを同期する（§14.3.2）。
+    /// 起動時には呼ばず、AI機能（AI監督・二つ名）を使うときに初めて呼ぶ（2026-11-08変更、技術実装仕様書 §14.2）。
+    /// そのため AI機能を使わない利用者は Supabase に何も送らない
     func ensureAuthenticated() async throws {
         if client.auth.currentSession == nil {
             try await client.auth.signInAnonymously()
@@ -35,190 +37,17 @@ class SupabaseManager {
             await MainActor.run {
                 UserProfileManager.shared.syncId(with: uid)
             }
-            // users テーブルに upsert して FK 制約に備える
-            let profile = await MainActor.run { UserProfileManager.shared.profile }
-            try? await upsertUser(profile)
+            // AI機能のテーブルが users を参照しているため、先に行を作っておく
+            try? await upsertUser()
         }
     }
 
     // MARK: - users テーブル
 
-    /// 表示名と生年月日はサーバーで使っていないため送らない（技術実装仕様書 §14.2）
-    func upsertUser(_ profile: UserProfile) async throws {
+    /// 送るのは匿名のIDだけ。表示名・生年月日・性別はサーバーで使っていないため送らない（技術実装仕様書 §14.2）
+    func upsertUser() async throws {
         guard let userId = currentUserId else { return }
-        let row = UserRow(
-            id: userId,
-            gender: profile.gender?.rawValue
-        )
-        try await client.from("users").upsert(row).execute()
-    }
-
-    // MARK: - session_summaries テーブル
-
-    func uploadSessionSummary(_ session: TrainingSession, radar: PlayerRadarData) async throws {
-        guard let userId = currentUserId else {
-            print("❌ uploadSessionSummary: currentUserIdがnilのためアップロードをスキップ: session=\(session.id)")
-            return
-        }
-        let row = SessionSummaryRow(
-            userId: userId,
-            localSessionId: session.id,
-            sessionName: session.name,
-            sessionDate: ISO8601DateFormatter().string(from: session.date),
-            durationSeconds: session.duration,
-            totalDistanceMeters: session.totalDistance,
-            maxSpeedMs: session.maxSpeed,
-            avgSpeedMs: session.avgSpeed,
-            sprintCount: session.sprintCount,
-            agilityEventCount: session.agilityTurnCount,
-            heartRate: session.heartRate,
-            activeCaloriesKcal: session.activeCalories,
-            staminaDrop: session.staminaDrop,
-            hrIntensityRatio: session.hrIntensityRatio,
-            radarDistance: radar.distance,
-            radarSprint: radar.sprint,
-            radarAgility: radar.agility,
-            radarStamina: radar.stamina,
-            radarIntensity: radar.intensity,
-            radarTopSpeed: radar.topSpeed,
-            radarOverallScore: radar.overallScore,
-            playerType: radar.playerType.rawValue
-        )
-        try await client.from("session_summaries").upsert(row, onConflict: "user_id,local_session_id").execute()
-    }
-
-    // MARK: - calibration_results テーブル
-
-    func uploadCalibrationResult(
-        age: Int?,
-        gender: Gender?,
-        maxSpeed: Double?,
-        agilityPeakG: Double?,
-        agilityEventCount: Int?
-    ) async throws {
-        guard let userId = currentUserId else { return }
-        let row = CalibrationResultRow(
-            userId: userId,
-            recordedAt: ISO8601DateFormatter().string(from: Date()),
-            ageAtRecording: age,
-            gender: gender?.rawValue,
-            maxSpeedMs: maxSpeed,
-            maxSpeedKmh: maxSpeed.map { $0 * 3.6 },
-            agilityPeakG: agilityPeakG,
-            agilityEventCount: agilityEventCount
-        )
-        try await client.from("calibration_results").insert(row).execute()
-    }
-
-    // MARK: - RPC: 年代・性別ごとの集計
-
-    func fetchCalibrationStats() async throws -> [AgeGroupStats] {
-        let rows: [CalibrationStatRow] = try await client
-            .rpc("get_calibration_stats")
-            .execute()
-            .value
-        return rows.map { row in
-            AgeGroupStats(
-                ageGroup: row.ageGroup,
-                gender: row.gender ?? "",
-                count: Int(row.n),
-                medianSpeedKmh: row.medianKmh,
-                p25SpeedKmh: row.p25Kmh,
-                p75SpeedKmh: row.p75Kmh,
-                medianAgilityG: row.medianG
-            )
-        }
-    }
-
-    // MARK: - RPC: レーダーチャートMax基準値の参考集計（§24 開発者用）
-
-    /// session_summaries に溜まった実績データから、レーダー各軸の分布（p50/p75/p90）を返す。
-    /// この値は開発者がMax定数（SessionDataManager.computePlayerRadar）を見直す際の参考であり、
-    /// アプリが自動でMaxに反映するものではない。
-    func fetchRadarReferenceStats() async throws -> RadarReferenceStats {
-        let rows: [RadarReferenceStatRow] = try await client
-            .rpc("get_radar_reference_stats")
-            .execute()
-            .value
-        guard let row = rows.first else {
-            return RadarReferenceStats(n: 0, distance: .zero, sprint: .zero, agility: .zero, hrIntensity: .zero, maxSpeed: .zero)
-        }
-        return RadarReferenceStats(
-            n: row.n,
-            distance: Percentiles(p50: row.distancePerMinP50, p75: row.distancePerMinP75, p90: row.distancePerMinP90),
-            sprint: Percentiles(p50: row.sprintPerMinP50, p75: row.sprintPerMinP75, p90: row.sprintPerMinP90),
-            agility: Percentiles(p50: row.agilityPerMinP50, p75: row.agilityPerMinP75, p90: row.agilityPerMinP90),
-            hrIntensity: Percentiles(p50: row.hrIntensityRatioP50, p75: row.hrIntensityRatioP75, p90: row.hrIntensityRatioP90),
-            maxSpeed: Percentiles(p50: row.maxSpeedMsP50, p75: row.maxSpeedMsP75, p90: row.maxSpeedMsP90)
-        )
-    }
-
-    struct Percentiles {
-        let p50: Double?
-        let p75: Double?
-        let p90: Double?
-
-        static let zero = Percentiles(p50: nil, p75: nil, p90: nil)
-    }
-
-    struct RadarReferenceStats {
-        let n: Int
-        let distance: Percentiles     // m/分
-        let sprint: Percentiles       // 回/分
-        let agility: Percentiles      // 回/分
-        let hrIntensity: Percentiles  // %
-        let maxSpeed: Percentiles     // m/s
-    }
-
-    private struct RadarReferenceStatRow: Decodable {
-        let n: Int
-        let distancePerMinP50: Double?
-        let distancePerMinP75: Double?
-        let distancePerMinP90: Double?
-        let sprintPerMinP50: Double?
-        let sprintPerMinP75: Double?
-        let sprintPerMinP90: Double?
-        let agilityPerMinP50: Double?
-        let agilityPerMinP75: Double?
-        let agilityPerMinP90: Double?
-        let hrIntensityRatioP50: Double?
-        let hrIntensityRatioP75: Double?
-        let hrIntensityRatioP90: Double?
-        let maxSpeedMsP50: Double?
-        let maxSpeedMsP75: Double?
-        let maxSpeedMsP90: Double?
-
-        enum CodingKeys: String, CodingKey {
-            case n
-            case distancePerMinP50 = "distance_per_min_p50"
-            case distancePerMinP75 = "distance_per_min_p75"
-            case distancePerMinP90 = "distance_per_min_p90"
-            case sprintPerMinP50   = "sprint_per_min_p50"
-            case sprintPerMinP75   = "sprint_per_min_p75"
-            case sprintPerMinP90   = "sprint_per_min_p90"
-            case agilityPerMinP50  = "agility_per_min_p50"
-            case agilityPerMinP75  = "agility_per_min_p75"
-            case agilityPerMinP90  = "agility_per_min_p90"
-            case hrIntensityRatioP50 = "hr_intensity_ratio_p50"
-            case hrIntensityRatioP75 = "hr_intensity_ratio_p75"
-            case hrIntensityRatioP90 = "hr_intensity_ratio_p90"
-            case maxSpeedMsP50     = "max_speed_ms_p50"
-            case maxSpeedMsP75     = "max_speed_ms_p75"
-            case maxSpeedMsP90     = "max_speed_ms_p90"
-        }
-    }
-
-    // MARK: - AgeGroupStats（CalibrationStatsView と共有）
-
-    struct AgeGroupStats: Identifiable {
-        let id = UUID()
-        let ageGroup: String
-        let gender: String
-        let count: Int
-        let medianSpeedKmh: Double
-        let p25SpeedKmh: Double
-        let p75SpeedKmh: Double
-        let medianAgilityG: Double?
+        try await client.from("users").upsert(UserRow(id: userId)).execute()
     }
 
     // MARK: - AI監督フィードバック（§20）
@@ -230,6 +59,7 @@ class SupabaseManager {
         persona: String? = nil,
         purpose: String = "coach_feedback"
     ) async throws -> String {
+        try await ensureAuthenticated()
         struct RequestBody: Encodable {
             let localSessionId: String
             let persona: String?
@@ -267,6 +97,7 @@ class SupabaseManager {
             let error: AICoachFeedbackError
         }
 
+        try await ensureAuthenticated()
         do {
             return try await client.functions.invoke(
                 "ai-coach-feedback",
@@ -320,6 +151,7 @@ class SupabaseManager {
             let error: AICoachFeedbackError
         }
 
+        try await ensureAuthenticated()
         do {
             return try await client.functions.invoke(
                 "ai-nickname",
@@ -372,100 +204,5 @@ class SupabaseManager {
 
     private struct UserRow: Encodable {
         let id: UUID
-        let gender: String?
-    }
-
-    private struct SessionSummaryRow: Encodable {
-        let userId: UUID
-        let localSessionId: String
-        let sessionName: String
-        let sessionDate: String
-        let durationSeconds: Double
-        let totalDistanceMeters: Double
-        let maxSpeedMs: Double
-        let avgSpeedMs: Double
-        let sprintCount: Int?
-        let agilityEventCount: Int?
-        let heartRate: Double?
-        let activeCaloriesKcal: Double?
-        let staminaDrop: Double?
-        let hrIntensityRatio: Double?
-        let radarDistance: Double
-        let radarSprint: Double
-        let radarAgility: Double
-        let radarStamina: Double
-        let radarIntensity: Double
-        let radarTopSpeed: Double
-        let radarOverallScore: Double
-        let playerType: String
-
-        enum CodingKeys: String, CodingKey {
-            case userId              = "user_id"
-            case localSessionId      = "local_session_id"
-            case sessionName         = "session_name"
-            case sessionDate         = "session_date"
-            case durationSeconds     = "duration_seconds"
-            case totalDistanceMeters = "total_distance_meters"
-            case maxSpeedMs          = "max_speed_ms"
-            case avgSpeedMs          = "avg_speed_ms"
-            case sprintCount         = "sprint_count"
-            case agilityEventCount   = "agility_event_count"
-            case heartRate           = "heart_rate"
-            case activeCaloriesKcal  = "active_calories_kcal"
-            case staminaDrop         = "stamina_drop"
-            case hrIntensityRatio    = "hr_intensity_ratio"
-            case radarDistance       = "radar_distance"
-            case radarSprint         = "radar_sprint"
-            case radarAgility        = "radar_agility"
-            case radarStamina        = "radar_stamina"
-            case radarIntensity      = "radar_intensity"
-            case radarTopSpeed       = "radar_top_speed"
-            case radarOverallScore   = "radar_overall_score"
-            case playerType          = "player_type"
-        }
-    }
-
-    private struct CalibrationResultRow: Encodable {
-        let userId: UUID
-        let recordedAt: String
-        let ageAtRecording: Int?
-        let gender: String?
-        let maxSpeedMs: Double?
-        let maxSpeedKmh: Double?
-        let agilityPeakG: Double?
-        let agilityEventCount: Int?
-
-        enum CodingKeys: String, CodingKey {
-            case userId           = "user_id"
-            case recordedAt       = "recorded_at"
-            case ageAtRecording   = "age_at_recording"
-            case gender
-            case maxSpeedMs       = "max_speed_ms"
-            case maxSpeedKmh      = "max_speed_kmh"
-            case agilityPeakG     = "agility_peak_g"
-            case agilityEventCount = "agility_event_count"
-        }
-    }
-
-    // MARK: - Decodable RPC Response
-
-    private struct CalibrationStatRow: Decodable {
-        let ageGroup: String
-        let gender: String?
-        let n: Int
-        let medianKmh: Double
-        let p25Kmh: Double
-        let p75Kmh: Double
-        let medianG: Double?
-
-        enum CodingKeys: String, CodingKey {
-            case ageGroup  = "age_group"
-            case gender
-            case n
-            case medianKmh = "median_kmh"
-            case p25Kmh    = "p25_kmh"
-            case p75Kmh    = "p75_kmh"
-            case medianG   = "median_g"
-        }
     }
 }
