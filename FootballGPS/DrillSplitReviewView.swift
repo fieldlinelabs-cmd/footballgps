@@ -50,7 +50,7 @@ struct DrillSplitReviewView: View {
                         DrillSplitFieldMapView(
                             gpsData: gpsData,
                             field: field,
-                            isFlipped: session.isFlipped,
+                            orientation: session.courtOrientation,
                             ranges: ranges,
                             breaks: breaks
                         )
@@ -84,7 +84,7 @@ struct DrillSplitReviewView: View {
                                 session: session,
                                 gpsData: gpsData,
                                 field: field,
-                                isFlipped: session.isFlipped,
+                                orientation: session.courtOrientation,
                                 initialRanges: ranges,
                                 onConfirmed: { dismiss() }
                             )

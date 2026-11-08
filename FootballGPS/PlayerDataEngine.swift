@@ -4,33 +4,16 @@
 //
 //  「プレイヤーデータ」機能（§22）の計算ロジック。
 //  新しい永続化ストアは持たず、既存の SessionDataManager.shared.sessions から
-//  レベル・比較カード・バッジの状態をすべて都度計算する。
+//  累計プレー時間・比較カード・バッジの状態をすべて都度計算する。
 
 import Foundation
 
-// MARK: - レベル・XP
+// MARK: - 累計プレー時間
 
 enum PlayerDataEngine {
-    /// 1セッションの獲得XP
-    static func sessionXP(_ session: TrainingSession) -> Int {
-        Int(session.totalDistance / 10) + (session.sprintCount ?? 0) * 5 + 20
-    }
-
-    static func totalXP(sessions: [TrainingSession]) -> Int {
-        eligibleSessions(sessions).reduce(0) { $0 + sessionXP($1) }
-    }
-
-    static func level(forXP xp: Int) -> Int {
-        xp / 1000 + 1
-    }
-
-    /// 現在のレベル内での獲得済みXP（0...999）
-    static func xpIntoCurrentLevel(_ xp: Int) -> Int {
-        xp % 1000
-    }
-
-    static func xpToNextLevel(_ xp: Int) -> Int {
-        1000 - xpIntoCurrentLevel(xp)
+    /// 累計プレー時間（秒）。バッジ判定と同じく eligibleSessions の対象のみを合計する。
+    static func totalPlayTime(sessions: [TrainingSession]) -> TimeInterval {
+        eligibleSessions(sessions).reduce(0) { $0 + $1.duration }
     }
 
     // MARK: - 比較カード
@@ -44,7 +27,7 @@ enum PlayerDataEngine {
         let recentAverageDuration: TimeInterval
     }
 
-    /// 平均・バッジ判定の対象とするセッション（5分未満・「平均から除外」指定は対象外）。
+    /// 平均・バッジ判定の対象とするセッション（5分未満・「集計から除外」指定は対象外）。
     /// 既存の統計表示（ViewsSessionDetailView等）と同じ基準。プレイヤーデータ機能の
     /// 全計算（比較カード・レーダーチャート・バッジ）はこのフィルタを通したセッションのみを使う。
     static func eligibleSessions(_ sessions: [TrainingSession]) -> [TrainingSession] {
@@ -152,15 +135,7 @@ enum PlayerDataEngine {
     }
 
     private static func radar(for session: TrainingSession) -> PlayerRadarData {
-        SessionDataManager.computePlayerRadar(
-            totalDistance: session.totalDistance,
-            duration: session.duration,
-            sprintCount: session.sprintCount ?? 0,
-            agilityTurnCount: session.agilityTurnCount,
-            staminaDrop: session.staminaDrop,
-            hrIntensityRatio: session.hrIntensityRatio,
-            maxSpeed: session.maxSpeed
-        )
+        SessionDataManager.computePlayerRadar(for: session)
     }
 
     private static func overallScore(for session: TrainingSession) -> Double {
@@ -168,13 +143,12 @@ enum PlayerDataEngine {
     }
 
     private static func radarValues(for session: TrainingSession) -> [Double] {
-        let r = radar(for: session)
-        return [r.distance, r.sprint, r.agility, r.stamina, r.intensity, r.topSpeed]
+        radar(for: session).axisValues
     }
 
     // MARK: - レーダーチャート: 直近5回平均 vs 自己ベスト
 
-    static let radarAxisLabels = ["走力", "スプリント", "アジリティ", "スタミナ", "高強度", "最高速度"]
+    static let radarAxisLabels = RadarChartView.axisLabels
 
     struct RadarComparison {
         let recentAverage: [Double] // 直近5回（無ければあるだけ）の各軸平均
@@ -193,16 +167,18 @@ enum PlayerDataEngine {
         let latestValues = radarValues(for: sortedByRecent[0])
 
         func average(_ arrays: [[Double]]) -> [Double] {
-            var sums = [Double](repeating: 0, count: 6)
+            let axes = radarAxisLabels.count
+            var sums = [Double](repeating: 0, count: axes)
             for arr in arrays {
-                for i in 0..<6 { sums[i] += arr[i] }
+                for i in 0..<axes { sums[i] += arr[i] }
             }
             return sums.map { $0 / Double(arrays.count) }
         }
         func maxPerAxis(_ arrays: [[Double]]) -> [Double] {
-            var best = [Double](repeating: 0, count: 6)
+            let axes = radarAxisLabels.count
+            var best = [Double](repeating: 0, count: axes)
             for arr in arrays {
-                for i in 0..<6 { best[i] = max(best[i], arr[i]) }
+                for i in 0..<axes { best[i] = max(best[i], arr[i]) }
             }
             return best
         }
@@ -225,8 +201,8 @@ enum PlayerDataEngine {
         .general: [1, 5, 20, 35, 50],
     ]
     private static let sprintThresholds: [PlayerCategory: [Int]] = [
-        .youth:   [50, 200, 500, 1500],
-        .general: [50, 200, 400, 600],
+        .youth:   [30, 100, 250, 500],
+        .general: [20, 50, 100, 150],
     ]
 
     private static let categoryUnavailableReason = "選手カテゴリを設定すると挑戦できます"
@@ -272,7 +248,7 @@ enum PlayerDataEngine {
         }
 
         let longRunCount = sessions.filter { $0.totalDistance >= 5000 }.count
-        let sprinterCount = sessions.filter { ($0.sprintCount ?? 0) >= 20 }.count
+        let sprinterCount = sessions.filter { ($0.sprintCount ?? 0) >= 10 }.count
         let eliteCount = sessions.filter { overallScore(for: $0) >= 80 }.count
 
         let thresholds = goodSessionThresholds[category]!

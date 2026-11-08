@@ -34,7 +34,7 @@ struct ShareCardView: View {
     let data: ShareCardData
     let gpsData: GPSData
     let field: Field
-    let isFlipped: Bool
+    let orientation: CourtOrientation
     let background: ShareCardBackground
 
     var body: some View {
@@ -79,7 +79,7 @@ struct ShareCardView: View {
             innerWidth = (innerHeight - margin) * ratio + margin
         }
         // FieldHeatmapView 自身の外側の余白（.padding() の16pt）を打ち消す
-        return FieldHeatmapView(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        return FieldHeatmapView(gpsData: gpsData, field: field, orientation: orientation)
             .frame(width: innerWidth + 32, height: innerHeight + 32)
             .padding(-16)
             .frame(width: innerWidth, height: innerHeight)
@@ -176,7 +176,7 @@ struct ShareCardSheet: View {
     let data: ShareCardData
     let gpsData: GPSData
     let field: Field
-    let isFlipped: Bool
+    let orientation: CourtOrientation
 
     @Environment(\.dismiss) private var dismiss
     @State private var background: ShareCardBackground = .normal
@@ -239,7 +239,7 @@ struct ShareCardSheet: View {
 
     /// 画面上のプレビュー。透明の背景は市松模様の上に置いて透けていることを示す
     private var cardPreview: some View {
-        ShareCardView(data: data, gpsData: gpsData, field: field, isFlipped: isFlipped, background: background)
+        ShareCardView(data: data, gpsData: gpsData, field: field, orientation: orientation, background: background)
             .background {
                 if background == .transparent {
                     Canvas { context, size in
@@ -262,7 +262,7 @@ struct ShareCardSheet: View {
     @MainActor
     private func render() {
         let renderer = ImageRenderer(
-            content: ShareCardView(data: data, gpsData: gpsData, field: field, isFlipped: isFlipped, background: background)
+            content: ShareCardView(data: data, gpsData: gpsData, field: field, orientation: orientation, background: background)
         )
         renderer.scale = 3
         renderer.isOpaque = background == .normal

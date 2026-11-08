@@ -2,7 +2,7 @@
 //  ViewsPlayerDataView.swift
 //  FootballGPS
 //
-//  「プレイヤーデータ」画面（§22）。レベル・レーダーチャート・バッジ一覧を表示する。
+//  「プレイヤーデータ」画面（§22）。累計プレー時間・レーダーチャート・バッジ一覧を表示する。
 //  直近5回平均との比較カードと推移は Stats タブ（ViewsGrowthTrendView.swift）にある。
 //  計算は PlayerDataEngine に集約し、このファイルは表示のみを担当する。
 
@@ -17,10 +17,9 @@ struct PlayerDataView: View {
 
     private var sessions: [TrainingSession] { dataManager.sessions }
 
-    private var totalXP: Int { PlayerDataEngine.totalXP(sessions: sessions) }
-    private var level: Int { PlayerDataEngine.level(forXP: totalXP) }
-    private var xpIntoLevel: Int { PlayerDataEngine.xpIntoCurrentLevel(totalXP) }
-    private var xpToNext: Int { PlayerDataEngine.xpToNextLevel(totalXP) }
+    private var totalPlayMinutes: Int {
+        Int(PlayerDataEngine.totalPlayTime(sessions: sessions) / 60)
+    }
 
     private var sections: [PlayerDataEngine.BadgeSection] {
         PlayerDataEngine.allSections(sessions: sessions, playerCategory: profileManager.profile.playerCategory)
@@ -49,7 +48,7 @@ struct PlayerDataView: View {
         latestNickname = try? await SupabaseManager.shared.fetchLatestNickname()
     }
 
-    // MARK: - ヘッダー（所属チーム・アバター・レベル）
+    // MARK: - ヘッダー（所属チーム・アバター・累計プレー時間）
 
     private var hasTeamInfo: Bool {
         profileManager.profile.teamEmblemImageData != nil
@@ -57,50 +56,43 @@ struct PlayerDataView: View {
     }
 
     private var headerCard: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 14) {
-                if hasTeamInfo {
+        // エンブレムはチーム名と同じ行に置く。以前は右上に重ねていたため、
+        // 長い二つ名や名前がエンブレムの下にもぐっていた（2026-11-08）
+        VStack(alignment: .leading, spacing: 14) {
+            if hasTeamInfo {
+                HStack(spacing: 12) {
                     Text(profileManager.profile.teamName?.isEmpty == false ? profileManager.profile.teamName! : "所属チーム未設定")
                         .font(.subheadline.bold())
                         .foregroundStyle(.secondary)
-                        .padding(.trailing, 90)
-                }
-
-                HStack(spacing: 20) {
-                    avatarView
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let latestNickname {
-                            Button {
-                                showNicknameReason = true
-                            } label: {
-                                Text("「\(latestNickname.nickname)」")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        Text(profileManager.profile.displayName.isEmpty ? "名前未設定" : profileManager.profile.displayName)
-                            .font(.headline)
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("Lv.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("\(level)")
-                                .font(.largeTitle.bold())
-                        }
-                        ProgressView(value: Double(xpIntoLevel), total: 1000)
-                            .tint(.accentColor)
-                        Text("次のレベルまで \(xpToNext) XP")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    teamEmblemView
                 }
             }
 
-            if hasTeamInfo {
-                teamEmblemView
+            HStack(spacing: 20) {
+                avatarView
+                VStack(alignment: .leading, spacing: 6) {
+                    if let latestNickname {
+                        Button {
+                            showNicknameReason = true
+                        } label: {
+                            Text("「\(latestNickname.nickname)」")
+                                .font(.caption.bold())
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text(profileManager.profile.displayName.isEmpty ? "名前未設定" : profileManager.profile.displayName)
+                        .font(.headline)
+                    Text("累計プレー時間")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    totalPlayTimeText
+                }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
@@ -113,6 +105,29 @@ struct PlayerDataView: View {
         } message: {
             Text(latestNickname?.reason ?? "")
         }
+    }
+
+    /// 「128時間 34分」の形で、数字を大きく・単位を小さく表示する
+    private var totalPlayTimeText: some View {
+        let hours = totalPlayMinutes / 60
+        let minutes = totalPlayMinutes % 60
+        return HStack(alignment: .firstTextBaseline, spacing: 2) {
+            if hours > 0 {
+                Text("\(hours)")
+                    .font(.largeTitle.bold())
+                Text("時間")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 4)
+            }
+            Text("\(minutes)")
+                .font(hours > 0 ? .title2.bold() : .largeTitle.bold())
+            Text("分")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
     }
 
     private var avatarView: some View {

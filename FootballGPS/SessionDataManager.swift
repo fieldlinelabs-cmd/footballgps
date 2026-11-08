@@ -48,7 +48,10 @@ class SessionDataManager: ObservableObject {
     /// セッションを保存（sprintCount は GPS データから再計算して上書きする）
     func saveSession(_ session: TrainingSession, gpsData: GPSData) {
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            // 同じ記録が届き直しても、ユーザーが書いた振り返りは消さない
+            let reflection = session.reflection ?? sessions[index].reflection
             sessions[index] = session
+            sessions[index].reflection = reflection
         } else {
             sessions.append(session)
         }
@@ -61,6 +64,7 @@ class SessionDataManager: ObservableObject {
         let count = SessionDataManager.calculateSprintCount(from: gpsData)
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index].sprintCount = count
+            sessions[index].highSpeedDistance = SessionDataManager.computeHighSpeedDistance(gpsData.points)
             // Watch が記録中に出した最高速度ではなく、外れ値を除いた速度から計算し直す（技術実装仕様書 §1.8）
             if !gpsData.points.isEmpty {
                 sessions[index].maxSpeed = SessionDataManager.cleanedMaxSpeed(gpsData.points)
@@ -98,79 +102,40 @@ class SessionDataManager: ObservableObject {
         print("📊 総セッション数: \(sessions.count)")
     }
 
-    /// 年齢・性別に応じたスプリント開始閾値を返す（m/s）
+    /// 年齢・性別に応じたスプリント開始閾値を返す（m/s）。根拠は技術実装仕様書 §13.4
+    /// - 16〜39歳: プロの基準（男子 25km/h＝FIFA・Jリーグ、女子 23km/h＝FIFA女子W杯）
+    /// - 15歳以下: 育成年代の研究の最高速度 × プロと同じ割合
+    /// - 40歳以上: 地域のマスターズ大会の中央値の速さ × プロと同じ割合
+    /// 未設定は 25歳・男子扱い。表を変えたら sprintThresholdVersion を上げる
     static func sprintThreshold(age: Int?, gender: Gender?) -> Double {
-        let g = gender ?? .male
-        let a = age ?? 25
+        let kmh: Double
+        switch (gender ?? .male, age ?? 25) {
+        case (.female, ..<12):   kmh = 16.0
+        case (.female, 12):      kmh = 18.0
+        case (.female, 13..<16): kmh = 20.5
+        case (.female, 16..<40): kmh = 23.0
+        case (.female, 40..<50): kmh = 16.0
+        case (.female, 50..<60): kmh = 15.5
+        case (.female, 60..<70): kmh = 14.5
+        case (.female, _):       kmh = 13.0
 
-        switch (g, a) {
-        // 13歳未満は50代と同じ（技術実装仕様書 §13.4.0）
-        case (.female, ..<13):   return 3.89  // 14.0 km/h
-        case (.female, 13..<20): return 4.72  // 17.0 km/h
-        case (.female, 20..<40): return 4.72
-        case (.female, 40..<50): return 4.17  // 15.0 km/h
-        case (.female, 50..<60): return 3.89  // 14.0 km/h
-        case (.female, 60...):   return 3.33  // 12.0 km/h
-
-        case (_, ..<13):   return 4.44  // 16.0 km/h
-        case (_, 13..<20): return 5.56  // 20.0 km/h
-        case (_, 20..<40): return 5.56
-        case (_, 40..<50): return 5.00  // 18.0 km/h
-        case (_, 50..<60): return 4.44  // 16.0 km/h
-        case (_, 60...):   return 3.89  // 14.0 km/h
-
-        default: return 5.56
+        case (_, ..<12):   kmh = 16.0
+        case (_, 12):      kmh = 18.0
+        case (_, 13):      kmh = 19.5
+        case (_, 14..<16): kmh = 20.0
+        case (_, 16..<40): kmh = 25.0
+        case (_, 40..<50): kmh = 18.5
+        case (_, 50..<60): kmh = 17.5
+        case (_, 60..<70): kmh = 16.5
+        case (_, _):       kmh = 15.0
         }
+        return kmh / 3.6
     }
 
-    /// GPS データからスプリント回数を計算する
+    /// GPS データからスプリント回数を計算する。数え方はセッション詳細・一括再計算と同じ
+    /// `computeSprintSegments`（基準以上で走り始め、1秒以上続いたもの。Jリーグと同じ1秒）
     static func calculateSprintCount(from gpsData: GPSData) -> Int {
-        let sprintThreshold = sprintThreshold(
-            age: UserProfileManager.shared.age,
-            gender: UserProfileManager.shared.profile.gender
-        )
-        let sprintEndThreshold = sprintThreshold * 0.72
-        let minSprintDuration: TimeInterval = 2.0
-        let minSprintInterval: TimeInterval = 5.0
-
-        var count = 0
-        var isInSprint = false
-        var isInSprintCandidate = false
-        var candidateStartTime: Date? = nil
-        var lastSprintEndTime: Date? = nil
-
-        for point in removingSpeedSpikes(gpsData.points) {
-            let speed = point.speed
-            let timestamp = point.timestamp
-
-            if isInSprint {
-                if speed < sprintEndThreshold {
-                    isInSprint = false
-                    lastSprintEndTime = timestamp
-                }
-            } else if isInSprintCandidate {
-                if speed < sprintEndThreshold {
-                    isInSprintCandidate = false
-                    candidateStartTime = nil
-                } else if let start = candidateStartTime,
-                          timestamp.timeIntervalSince(start) >= minSprintDuration {
-                    isInSprint = true
-                    isInSprintCandidate = false
-                    count += 1
-                }
-            } else {
-                if speed >= sprintThreshold {
-                    let canStart = lastSprintEndTime == nil ||
-                        timestamp.timeIntervalSince(lastSprintEndTime!) >= minSprintInterval
-                    if canStart {
-                        isInSprintCandidate = true
-                        candidateStartTime = timestamp
-                    }
-                }
-            }
-        }
-
-        return count
+        computeSprintSegments(gpsData.points).count
     }
 
     // MARK: - 速度の外れ値除去（docs/技術実装仕様書.md §1.8）
@@ -184,6 +149,9 @@ class SessionDataManager: ObservableObject {
     ///    本物のスプリントは最高速度に近い速度が2点以上続くので残り、1点だけ高い値や、
     ///    上下にギザギザ揺れながら上がる誤読は消える。先頭・末尾は隣の点との低い方
     /// 2. 1 のあとも 38km/h を超える点（誤読が続いた場合）は、前後の上限以内の点で補う
+    /// 3. 1〜2点だけ前後より 5km/h 以上高い山のうち、GPS精度が悪い（10m以上）か、位置の移動から
+    ///    求めた速度と大きくずれる（30%以上）ものは誤読とみなし、前後の高い方の速度にする。
+    ///    1 の中央値では2点続く誤読は消えないため（実データで時速21km以上の大半がこれだった）
     /// 生データ（GPSファイル）は書き換えず、速度を使う計算の入口でこの関数を通す
     static func removingSpeedSpikes(_ points: [GPSPoint]) -> [GPSPoint] {
         guard points.count >= 2 else { return points }
@@ -204,6 +172,9 @@ class SessionDataManager: ObservableObject {
             speeds[i] = neighbors.isEmpty ? 0 : neighbors.reduce(0, +) / Double(neighbors.count)
         }
 
+        // 3. 2点まで続く誤読の山
+        removeShortUnreliablePeaks(&speeds, points: points)
+
         guard speeds != raw else { return points }
         return zip(points, speeds).map { point, speed in
             guard point.speed != speed else { return point }
@@ -216,6 +187,52 @@ class SessionDataManager: ObservableObject {
                 horizontalAccuracy: point.horizontalAccuracy,
                 heartRate: point.heartRate
             )
+        }
+    }
+
+    /// 山とみなす、前後の点との速度差（5km/h）
+    static let shortPeakMinJump: Double = 5.0 / 3.6
+    /// これ以上の GPS 精度（m）の点は、山の速度を信用しない
+    static let shortPeakPoorAccuracy: Double = 10.0
+    /// 位置の移動から求めた速度と GPS 速度のずれがこの割合以上なら、山の速度を信用しない
+    static let shortPeakMismatchRatio: Double = 0.3
+
+    /// removingSpeedSpikes の 3。speeds は 1・2 を済ませた速度で、points と同じ並び
+    private static func removeShortUnreliablePeaks(_ speeds: inout [Double], points: [GPSPoint]) {
+        guard speeds.count >= 3 else { return }
+        var i = 1
+        while i < speeds.count - 1 {
+            for length in 1...2 {
+                let end = i + length - 1
+                guard end < speeds.count - 1 else { continue }
+                let left = speeds[i - 1]
+                let right = speeds[end + 1]
+                let lowestInPeak = speeds[i...end].min() ?? 0
+                guard lowestInPeak - left >= shortPeakMinJump,
+                      lowestInPeak - right >= shortPeakMinJump else { continue }
+
+                let poorAccuracy = points[i...end].contains { $0.horizontalAccuracy >= shortPeakPoorAccuracy }
+                // 山の前後の点を含む区間で、位置の移動から求めた速度と GPS 速度を比べる
+                let from = i - 1, to = end + 1
+                let elapsed = points[to].timestamp.timeIntervalSince(points[from].timestamp)
+                var mismatch = false
+                if elapsed > 0 {
+                    var distance = 0.0
+                    for j in from..<to {
+                        let a = CLLocation(latitude: points[j].latitude, longitude: points[j].longitude)
+                        let b = CLLocation(latitude: points[j + 1].latitude, longitude: points[j + 1].longitude)
+                        distance += a.distance(from: b)
+                    }
+                    let implied = distance / elapsed
+                    let gps = speeds[from...to].reduce(0, +) / Double(to - from + 1)
+                    mismatch = abs(implied - gps) > shortPeakMismatchRatio * max(gps, 1)
+                }
+                guard poorAccuracy || mismatch else { continue }
+
+                for k in i...end { speeds[k] = max(left, right) }
+                break
+            }
+            i += 1
         }
     }
 
@@ -297,15 +314,15 @@ class SessionDataManager: ObservableObject {
     /// 最終バケットは5分未満になりうるため、バケット数の単純平均ではなく実時間で重み付けする
     /// （そうしないと短い最終バケットが後半平均を不当に押し下げてしまう）
     /// 返値: 0.85未満なら後半スタミナ低下とみなす
+    /// 前半か後半が `minHalfSeconds` に満たないときは比べられないので nil（判定しない）
     static func computeStaminaDropRate(buckets: [TimeSeriesBucket]) -> Double? {
-        guard buckets.count >= 2 else { return nil }
+        guard hasComparableHalves(buckets) else { return nil }
         let mid = buckets.count / 2
         let firstBuckets = buckets[0..<mid]
         let secondBuckets = buckets[mid...]
 
         let firstDuration = firstBuckets.map(\.durationSeconds).reduce(0, +)
         let secondDuration = secondBuckets.map(\.durationSeconds).reduce(0, +)
-        guard firstDuration > 0, secondDuration > 0 else { return nil }
 
         let firstRate = firstBuckets.map(\.distance).reduce(0, +) / firstDuration
         let secondRate = secondBuckets.map(\.distance).reduce(0, +) / secondDuration
@@ -313,25 +330,32 @@ class SessionDataManager: ObservableObject {
         return secondRate / firstRate
     }
 
+    /// 前半・後半それぞれに最低限必要な長さ（秒）。5分5秒の記録だと後半が最後の5秒だけになり、
+    /// 練習を終えて歩いた数秒で「後半に落ちた」と判定されていた（2026-11-08）
+    static let minHalfSeconds: TimeInterval = 120
+
+    /// 前半と後半（区間の数の半分で区切る）の両方が `minHalfSeconds` 以上あるか。
+    /// スタミナ低下率と前後半の平均心拍で同じ条件を使う
+    static func hasComparableHalves(_ buckets: [TimeSeriesBucket]) -> Bool {
+        guard buckets.count >= 2 else { return false }
+        let mid = buckets.count / 2
+        let firstDuration = buckets[0..<mid].map(\.durationSeconds).reduce(0, +)
+        let secondDuration = buckets[mid...].map(\.durationSeconds).reduce(0, +)
+        return firstDuration >= minHalfSeconds && secondDuration >= minHalfSeconds
+    }
+
     /// サード別滞在割合を計算（守備/中盤/攻撃、永続化しない）
     static func computeThirdRatios(
         gpsData: GPSData,
         field: Field,
-        isFlipped: Bool
+        orientation: CourtOrientation
     ) -> (defensive: Double, middle: Double, attacking: Double) {
         var defensiveCount = 0
         var middleCount    = 0
         var attackingCount = 0
 
-        for point in gpsData.points {
-            guard let fieldCoord = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else { continue }
-
-            let fy = isFlipped
-                ? field.dimensions.length - fieldCoord.y
-                : fieldCoord.y
-
+        for coord in field.dwellCoordinates(of: gpsData.points, orientation: orientation) {
+            let fy = coord.y
             let length = field.dimensions.length
             if fy < length / 3 {
                 defensiveCount += 1
@@ -356,29 +380,34 @@ class SessionDataManager: ObservableObject {
     /// プロスタイルを2段階で診断する
     /// - ステップ1: ヒートマップの空間類似度のみでポジション（カテゴリ）を判定
     /// - ステップ2: 判定済みポジション内のスタイルを、スタッツ類似度50% + サード滞在比率50%でタイプ判定
+    /// セッションに設定したポジションで、ステップ1の候補を絞る（docs/統計推移仕様書.md §5.6）。GK の手動設定は nil
     static func computeStyleSync(
         gpsData: GPSData,
         field: Field,
-        isFlipped: Bool,
+        orientation: CourtOrientation,
+        position sessionPosition: PlayingPosition?,
+        positionSource: PositionSource?,
         sprintCount: Int,
         agilityTurnCount: Int?,
         maxSpeed: Double
     ) -> StyleSyncDiagnosis? {
         guard !gpsData.points.isEmpty else { return nil }
+        let candidates = styleSyncCandidates(position: sessionPosition, positionSource: positionSource)
+        guard candidates?.isEmpty != true else { return nil }
 
-        let userGrid    = computeHeatmapGrid(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        let userGrid    = computeHeatmapGrid(gpsData: gpsData, field: field, orientation: orientation)
         let userSprint  = min(Double(sprintCount) / 30.0, 1.0)
         let userAgility = agilityTurnCount.map { min(Double($0) / 50.0, 1.0) }
         let userSpeed   = min(maxSpeed / 8.0, 1.0)
-        let userThirds  = computeThirdRatios(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        let userThirds  = computeThirdRatios(gpsData: gpsData, field: field, orientation: orientation)
 
         // ステップ1: ヒートマップ（空間類似度）のみでポジションを判定
         let spatialByStyle: [(style: ProStyle, spatialSim: Double)] = ProStyle.all.map { style in
-            let idealGrid = generateIdealHeatmap(style: style)
-            return (style, cosineSimilarity(userGrid, idealGrid))
+            (style, spatialSimilarity(userGrid, style: style))
         }
         let positionScoreByCategory = Dictionary(grouping: spatialByStyle, by: { $0.style.category })
             .mapValues { entries in entries.map(\.spatialSim).max() ?? 0 }
+            .filter { candidates?.contains($0.key) ?? true }
         guard let topCategory = positionScoreByCategory.max(by: { $0.value < $1.value }) else { return nil }
         let position = PositionSyncResult(category: topCategory.key, positionScore: topCategory.value * 100.0)
 
@@ -404,9 +433,20 @@ class SessionDataManager: ObservableObject {
         return StyleSyncDiagnosis(position: position, typeResults: typeResults)
     }
 
+    /// 診断のステップ1で選べるポジション。nil は全ポジション、空は診断しない（GK のスタイルがないため）。
+    /// WB はヒートマップで SB・WG と見分けられないので、自動の WB ルールで WB になった場合も2つに絞る
+    private static func styleSyncCandidates(
+        position: PlayingPosition?,
+        positionSource: PositionSource?
+    ) -> Set<PlayingPosition>? {
+        if position == .wb { return [.sb, .wg] }
+        guard positionSource == .manual, let position else { return nil }
+        return position == .gk ? [] : [position]
+    }
+
     // MARK: - Position Estimation（docs/統計推移仕様書.md §5・§6）
 
-    /// 推定・高さの計算に必要な、フィールド内の GPS 点の最小数（約1分）
+    /// 推定・高さの計算に必要な、フィールド内にいた秒数（dwellCoordinates の点は1秒に1つ）
     static let minPointsForPositionAnalysis = 60
 
     /// ポジション推定専用テンプレート（§5.2）。既存の generateIdealHeatmap は守備・中盤・攻撃の
@@ -424,35 +464,16 @@ class SessionDataManager: ObservableObject {
         PositionTemplate(position: .gk, rowCenters: [(1.0, 1.0)], sigmaRow: 1.8, lateralBias: 0.0, sigmaCol: 4.0),
     ]
 
-    /// isFlipped を反映したフィールド座標（x: 0〜width 左→右, y: 0〜length 守備→攻撃）。フィールド外の点も含む
-    private static func orientedFieldCoordinates(gpsData: GPSData, field: Field, isFlipped: Bool) -> [CGPoint] {
-        gpsData.points.compactMap { point in
-            guard let fc = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else { return nil }
-            return CGPoint(
-                x: isFlipped ? field.dimensions.width  - fc.x : fc.x,
-                y: isFlipped ? field.dimensions.length - fc.y : fc.y
-            )
-        }
-    }
-
-    private static func inFieldPointCount(_ coords: [CGPoint], field: Field) -> Int {
-        coords.filter {
-            (0...field.dimensions.width).contains($0.x) && (0...field.dimensions.length).contains($0.y)
-        }.count
-    }
-
     /// ヒートマップの空間類似度からポジションを推定する（§5.1）。WB は返さない。
     /// フィールド内の点が足りなければ nil
-    static func predictPosition(gpsData: GPSData, field: Field, isFlipped: Bool) -> PlayingPosition? {
-        let coords = orientedFieldCoordinates(gpsData: gpsData, field: field, isFlipped: isFlipped)
-        guard inFieldPointCount(coords, field: field) >= minPointsForPositionAnalysis else { return nil }
+    static func predictPosition(gpsData: GPSData, field: Field, orientation: CourtOrientation) -> PlayingPosition? {
+        let coords = field.dwellCoordinates(of: gpsData.points, orientation: orientation)
+        guard coords.count >= minPointsForPositionAnalysis else { return nil }
 
-        let userGrid = computeHeatmapGrid(gpsData: gpsData, field: field, isFlipped: isFlipped)
+        let userGrid = computeHeatmapGrid(gpsData: gpsData, field: field, orientation: orientation)
         var scores: [PlayingPosition: Double] = [:]
         for style in ProStyle.all {
-            let sim = cosineSimilarity(userGrid, generateIdealHeatmap(style: style))
+            let sim = spatialSimilarity(userGrid, style: style)
             scores[style.category] = max(scores[style.category] ?? 0, sim)
         }
         for template in positionTemplates {
@@ -463,13 +484,13 @@ class SessionDataManager: ObservableObject {
     }
 
     /// ポジションの高さ（§6）。0% = 自陣ゴールライン、100% = 敵陣ゴールライン。
-    /// フィールド外の点は 0〜100% にクランプして含める。フィールド内の点が足りなければ nil
-    static func computePositionHeights(gpsData: GPSData, field: Field, isFlipped: Bool) -> (avg: Double, front: Double, back: Double)? {
-        let coords = orientedFieldCoordinates(gpsData: gpsData, field: field, isFlipped: isFlipped)
-        guard inFieldPointCount(coords, field: field) >= minPointsForPositionAnalysis else { return nil }
+    /// 長くいた場所ほど重く数える。フィールド内にいた時間が足りなければ nil
+    static func computePositionHeights(gpsData: GPSData, field: Field, orientation: CourtOrientation) -> (avg: Double, front: Double, back: Double)? {
+        let coords = field.dwellCoordinates(of: gpsData.points, orientation: orientation)
+        guard coords.count >= minPointsForPositionAnalysis else { return nil }
 
         let heights = coords
-            .map { min(max($0.y / field.dimensions.length, 0), 1) * 100 }
+            .map { $0.y / field.dimensions.length * 100 }
             .sorted()
         let avg = heights.reduce(0, +) / Double(heights.count)
         // 最大値・最小値だと GPS の誤差1点に引っ張られるため 95・5 パーセンタイル
@@ -506,7 +527,7 @@ class SessionDataManager: ObservableObject {
     private static func computeHeatmapGrid(
         gpsData: GPSData,
         field: Field,
-        isFlipped: Bool
+        orientation: CourtOrientation
     ) -> [[Double]] {
         let gridRows = 28  // fy方向（守備→攻撃）
         let gridCols = 40  // fx方向（左→右）
@@ -514,14 +535,9 @@ class SessionDataManager: ObservableObject {
         let sigma: Double = 1.5
         let kernelRadius  = 4
 
-        for point in gpsData.points {
-            guard let fc = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else { continue }
-            let fx = isFlipped ? field.dimensions.width  - fc.x : fc.x
-            let fy = isFlipped ? field.dimensions.length - fc.y : fc.y
-            let row = Int((fy / field.dimensions.length) * Double(gridRows)).clamped(to: 0..<gridRows)
-            let col = Int((fx / field.dimensions.width)  * Double(gridCols)).clamped(to: 0..<gridCols)
+        for coord in field.dwellCoordinates(of: gpsData.points, orientation: orientation) {
+            let row = Int((coord.y / field.dimensions.length) * Double(gridRows)).clamped(to: 0..<gridRows)
+            let col = Int((coord.x / field.dimensions.width)  * Double(gridCols)).clamped(to: 0..<gridCols)
             for dr in -kernelRadius...kernelRadius {
                 for dc in -kernelRadius...kernelRadius {
                     let r = row + dr; let c = col + dc
@@ -534,8 +550,54 @@ class SessionDataManager: ObservableObject {
         return grid
     }
 
+    /// 理想ヒートマップのアウトサイドの置き方
+    private enum IdealHeatmapSide {
+        case both   // 左右対称
+        case left   // 左サイドだけ
+        case right  // 右サイドだけ
+    }
+
+    /// MF の理想ヒートマップを左右にずらすマス数（フィールド幅の1割）
+    private static let midfielderShiftCols = 4.0
+
+    /// スタイルごとの理想ヒートマップ。計算結果は変わらないので一度だけ作る。
+    /// 選手は片側のサイドでプレーするため、SB・WG は左右で別の絵にする（左右対称だと中央が濃くなる）。
+    /// MF は左右どちらかに寄ってプレーする場合があるので、中央の絵に左右へずらした絵を加える
+    private static let idealHeatmapsByStyleId: [String: [[[Double]]]] = Dictionary(
+        uniqueKeysWithValues: ProStyle.all.map { style in
+            let heatmaps: [[[Double]]]
+            switch style.category {
+            case .sb, .wg:
+                heatmaps = [
+                    generateIdealHeatmap(style: style, side: .left),
+                    generateIdealHeatmap(style: style, side: .right)
+                ]
+            case .mf:
+                heatmaps = [
+                    generateIdealHeatmap(style: style),
+                    generateIdealHeatmap(style: style, shiftCols: -midfielderShiftCols),
+                    generateIdealHeatmap(style: style, shiftCols: midfielderShiftCols)
+                ]
+            default:
+                heatmaps = [generateIdealHeatmap(style: style)]
+            }
+            return (style.id, heatmaps)
+        }
+    )
+
+    /// スタイルの理想ヒートマップのうち、最も近いものとのコサイン類似度
+    private static func spatialSimilarity(_ userGrid: [[Double]], style: ProStyle) -> Double {
+        (idealHeatmapsByStyleId[style.id] ?? [])
+            .map { cosineSimilarity(userGrid, $0) }
+            .max() ?? 0
+    }
+
     /// スタイル定義から理想ヒートマップを生成
-    private static func generateIdealHeatmap(style: ProStyle) -> [[Double]] {
+    private static func generateIdealHeatmap(
+        style: ProStyle,
+        side: IdealHeatmapSide = .both,
+        shiftCols: Double = 0
+    ) -> [[Double]] {
         let gridRows = 28  // fy方向（row=0: 守備, row=27: 攻撃）
         let gridCols = 40  // fx方向（col=0: 左, col=39: 右）
         var grid = Array(repeating: Array(repeating: 0.0, count: gridCols), count: gridRows)
@@ -544,22 +606,31 @@ class SessionDataManager: ObservableObject {
         let defCenter = 4.5;  let midCenter = 13.5;  let attCenter = 22.5
         let sigmaRow = 2.0 + style.heatmapSpread * 6.0
         let sigmaCol = 3.0 + style.heatmapSpread * 8.0
-        let centerCol = 19.5  // フィールド横方向の中心
+        let centerCol = 19.5 + shiftCols  // フィールド横方向の中心
+        let leftCol   = 5.0  + shiftCols
+        let rightCol  = 34.0 + shiftCols
+        let defensiveOutsideRatio = style.defensiveLateralBias ?? style.lateralBias
 
         for r in 0..<gridRows {
             for c in 0..<gridCols {
                 let rD = Double(r); let cD = Double(c)
-                // 縦方向: ゾーン比率でガウス重み
-                let rowW = style.defensiveThird * exp(-pow(rD - defCenter, 2) / (2 * sigmaRow * sigmaRow))
-                         + style.middleThird    * exp(-pow(rD - midCenter, 2) / (2 * sigmaRow * sigmaRow))
-                         + style.attackingThird * exp(-pow(rD - attCenter, 2) / (2 * sigmaRow * sigmaRow))
-                // 横方向: lateralBiasをそのまま「アウトサイド質量比率」として使用（左右対称）
-                let outsideRatio = style.lateralBias
+                // 縦方向: ゾーン比率でガウス重み。守備サードだけ横方向の比率が変わることがあるので分けて持つ
+                let defW = style.defensiveThird * exp(-pow(rD - defCenter, 2) / (2 * sigmaRow * sigmaRow))
+                let upperW = style.middleThird    * exp(-pow(rD - midCenter, 2) / (2 * sigmaRow * sigmaRow))
+                           + style.attackingThird * exp(-pow(rD - attCenter, 2) / (2 * sigmaRow * sigmaRow))
+                // 横方向: lateralBiasをそのまま「アウトサイド質量比率」として使用
                 let ctrW  = exp(-pow(cD - centerCol, 2) / (2 * sigmaCol * sigmaCol))
-                let leftW = exp(-pow(cD - 5.0,       2) / (2 * sigmaCol * sigmaCol))
-                let rgtW  = exp(-pow(cD - 34.0,      2) / (2 * sigmaCol * sigmaCol))
-                let colW = (1.0 - outsideRatio) * ctrW + outsideRatio * (leftW + rgtW) / 2.0
-                grid[r][c] = rowW * colW
+                let leftW = exp(-pow(cD - leftCol,   2) / (2 * sigmaCol * sigmaCol))
+                let rgtW  = exp(-pow(cD - rightCol,  2) / (2 * sigmaCol * sigmaCol))
+                let outsideW: Double
+                switch side {
+                case .both:  outsideW = (leftW + rgtW) / 2.0
+                case .left:  outsideW = leftW
+                case .right: outsideW = rgtW
+                }
+                let defColW = (1.0 - defensiveOutsideRatio) * ctrW + defensiveOutsideRatio * outsideW
+                let upperColW = (1.0 - style.lateralBias) * ctrW + style.lateralBias * outsideW
+                grid[r][c] = defW * defColW + upperW * upperColW
             }
         }
         let mx = grid.flatMap { $0 }.max() ?? 1.0
@@ -567,7 +638,7 @@ class SessionDataManager: ObservableObject {
         return grid
     }
 
-    /// 推定専用テンプレートから理想ヒートマップを生成（横方向の重みは generateIdealHeatmap と同じ式）
+    /// 推定専用テンプレートから理想ヒートマップを生成（横方向の重みは generateIdealHeatmap の左右対称と同じ式）
     private static func generateTemplateHeatmap(_ template: PositionTemplate) -> [[Double]] {
         let gridRows = 28
         let gridCols = 40
@@ -609,68 +680,114 @@ class SessionDataManager: ObservableObject {
 
     // MARK: - Player Radar Analysis
 
-    /// 6軸評価からレーダーチャートデータとプレイヤータイプを計算
+    /// 4軸のレーダーチャートデータとプレイヤータイプを計算する（技術実装仕様書 §17.2、2026-11-08見直し）
     ///
-    /// 参照値:
-    ///   走力  : 130 m/分（実績参考集計P90=127.2 m/分ベース、2026-07-20見直し。旧100は90分換算の
-    ///           アマチュアサッカー研究値だったが、実際のトレーニングセッション（短時間・高強度）は
-    ///           試合平均より単位時間あたりの運動量が高く、旧値ではP50時点で頭打ちしていた）
-    ///   スプリント: 1.0 回/分（実績参考集計P90=0.86 回/分ベース、2026-07-20見直し。旧0.4は
-    ///           P50時点で既に超過し頭打ちしていた。判明当初は参考集計P90=0.33で妥当に見えたが、
-    ///           `session.sprintCount`（記録時点の古い年齢デフォルトの閾値で計算された値）を
-    ///           アップロードしていたバグが別途見つかり、現在の年齢基準の閾値で再計算した正しい値に
-    ///           修正した結果、実際のレートはこれより大幅に高いことが判明した）
-    ///   アジリティ: 4.5 回/分（実績参考集計P90=4.23 回/分ベース、2026-07-20見直し。旧3.0は
-    ///           P75時点で既に超過し頭打ちしていた）
-    ///   スタミナ : スタミナ低下率（時間非依存）
-    ///   高強度  : 高強度HR時間率 100%（時間非依存、2026-07-20見直し。旧40%はP50時点で2倍以上
-    ///           超過し常に頭打ちだった。高強度HR時間率は本人の推定最大心拍数に対する割合という
-    ///           「本人内で完結する相対指標」であり、走力・アジリティのような他者と比較可能な絶対量
-    ///           ではない（同じ運動量でも鍛えられた人ほど心拍は上がりにくい）。そのため他軸のように
-    ///           母集団の分布からMaxを較正するのではなく、指標が元々取りうる範囲の上限である100%を
-    ///           Maxとし、「自分がどれだけ追い込んだか」を測る軸として扱う）
-    ///   最高速度 : 8.0 m/s ≈ 29 km/h（時間非依存）
-    ///
-    /// 走力・アジリティの見直し根拠は`RadarReferenceStatsView`（開発者用参考画面）およびSupabase RPC
-    /// `get_radar_reference_stats()`の実績集計。2026-07-20時点ではn=6・単一ユーザーのみのサンプルで、
-    /// テスターが増え次第再確認が必要（詳細は§17.2）。
+    /// 値はすべて「45分あたり」に換算し、満点は世界トップの選手の最高値にする（プロと直接比べられるように）。
+    /// 短い練習は1分あたりの値が高く出やすいが、それは構わない（ユーザー決定）。
+    ///   走力      : 6,850m/45分（キミッヒ選手 1試合13.73km）
+    ///   高速ランニング: 630m/45分（プレミアリーグのサイドハーフ 1試合 1,049±106m の平均＋2SD）
+    ///   スプリント  : 33回/45分（Jリーグ 前田大然選手 1試合66回）
+    ///   最高速度    : 37.4km/h（プレミアリーグ公式記録 ファン・デ・フェン選手 37.38km/h）
     static func computePlayerRadar(
         totalDistance: Double,
         duration: TimeInterval,
+        highSpeedDistance: Double?,
         sprintCount: Int,
-        agilityTurnCount: Int?,
-        staminaDrop: Double?,
-        hrIntensityRatio: Double?,
         maxSpeed: Double
     ) -> PlayerRadarData {
-        let minutes = max(duration / 60.0, 1.0)
+        let halves = max(duration / 60.0, 1.0) / 45.0
+        let distancePer45  = totalDistance / halves
+        let highSpeedPer45 = (highSpeedDistance ?? 0) / halves
+        let sprintsPer45   = Double(sprintCount) / halves
+        let topSpeedKmh    = maxSpeed * 3.6
 
-        // 時間正規化メトリクス（分あたり実績 ÷ 分あたり参照値）
-        let distanceScore  = min((totalDistance / minutes) / 130.0, 1.0)
-        let sprintScore    = min((Double(sprintCount) / minutes) / 1.0, 1.0)
-        let agilityScore   = min((Double(agilityTurnCount ?? 0) / minutes) / 4.5, 1.0)
-
-        // 時間非依存メトリクス
-        let staminaScore   = min(staminaDrop ?? 0, 1.0)
-        let intensityScore = min((hrIntensityRatio ?? 0) / 100.0, 1.0)
-        let topSpeedScore  = min(maxSpeed / 8.0, 1.0)  // 8 m/s ≈ 29 km/h = 1.0
-
-        let scores: [Double] = [distanceScore, sprintScore, agilityScore, staminaScore, intensityScore, topSpeedScore]
+        let scores: [Double] = [
+            min(distancePer45 / RadarMax.distancePer45, 1.0),
+            min(highSpeedPer45 / RadarMax.highSpeedPer45, 1.0),
+            min(sprintsPer45 / RadarMax.sprintsPer45, 1.0),
+            min(topSpeedKmh / RadarMax.topSpeedKmh, 1.0),
+        ]
         let overall = scores.reduce(0, +) / Double(scores.count) * 100.0
-
-        let types: [PlayerType] = [.longRunner, .sprinter, .agile, .stamina, .hardWorker, .speedster]
+        let types: [PlayerType] = [.longRunner, .hardWorker, .sprinter, .speedster]
         let maxIdx = scores.indices.max(by: { scores[$0] < scores[$1] }) ?? 0
 
         return PlayerRadarData(
-            distance:     distanceScore,
-            sprint:       sprintScore,
-            agility:      agilityScore,
-            stamina:      staminaScore,
-            intensity:    intensityScore,
-            topSpeed:     topSpeedScore,
-            playerType:   types[maxIdx],
+            distance: scores[0],
+            highSpeed: scores[1],
+            sprint: scores[2],
+            topSpeed: scores[3],
+            distancePer45: distancePer45,
+            highSpeedPer45: highSpeedPer45,
+            sprintsPer45: sprintsPer45,
+            topSpeedKmh: topSpeedKmh,
+            playerType: types[maxIdx],
             overallScore: overall
         )
+    }
+
+    /// 保存済みのセッションの値からレーダーを計算する
+    static func computePlayerRadar(for session: TrainingSession) -> PlayerRadarData {
+        computePlayerRadar(
+            totalDistance: session.totalDistance,
+            duration: session.duration,
+            highSpeedDistance: session.highSpeedDistance,
+            sprintCount: session.sprintCount ?? 0,
+            maxSpeed: session.maxSpeed
+        )
+    }
+
+    /// レーダーの満点（世界トップの選手の最高値、45分あたり）。根拠は computePlayerRadar のコメントと §17.2
+    enum RadarMax {
+        static let distancePer45: Double = 6_850
+        static let highSpeedPer45: Double = 630
+        static let sprintsPer45: Double = 33
+        static let topSpeedKmh: Double = 37.4
+    }
+
+    // MARK: - 高速ランニング（§13.4.A）
+
+    /// 年齢・性別に応じた高速ランニングの基準（m/s）。16〜39歳は FIFA の区切り（男子 20km/h・女子 19km/h）。
+    /// ほかの年代はスプリントの基準と同じ速さに高速ランニングの割合（男子 53.2%・女子 55.4%）を掛けた値
+    static func highSpeedThreshold(age: Int?, gender: Gender?) -> Double {
+        let kmh: Double
+        switch (gender ?? .male, age ?? 25) {
+        case (.female, ..<12):   kmh = 12.5
+        case (.female, 12):      kmh = 14.5
+        case (.female, 13..<16): kmh = 17.5
+        case (.female, 16..<40): kmh = 19.0
+        case (.female, 40..<50): kmh = 13.5
+        case (.female, 50..<60): kmh = 13.0
+        case (.female, 60..<70): kmh = 12.0
+        case (.female, _):       kmh = 10.5
+
+        case (_, ..<12):   kmh = 12.5
+        case (_, 12):      kmh = 14.5
+        case (_, 13):      kmh = 15.5
+        case (_, 14..<16): kmh = 16.0
+        case (_, 16..<40): kmh = 20.0
+        case (_, 40..<50): kmh = 14.5
+        case (_, 50..<60): kmh = 14.0
+        case (_, 60..<70): kmh = 13.0
+        case (_, _):       kmh = 12.0
+        }
+        return kmh / 3.6
+    }
+
+    /// 高速ランニングの基準以上の速さで走った距離（m）。速度は外れ値を除いた値（§1.8）、距離は位置から計算する
+    static func computeHighSpeedDistance(_ rawPoints: [GPSPoint]) -> Double {
+        let points = removingSpeedSpikes(rawPoints)
+        guard points.count >= 2 else { return 0 }
+        let threshold = highSpeedThreshold(
+            age: UserProfileManager.shared.age,
+            gender: UserProfileManager.shared.profile.gender
+        )
+        var distance = 0.0
+        for i in 1..<points.count where points[i].speed >= threshold {
+            let a = CLLocation(latitude: points[i - 1].latitude, longitude: points[i - 1].longitude)
+            let b = CLLocation(latitude: points[i].latitude, longitude: points[i].longitude)
+            distance += a.distance(from: b)
+        }
+        return distance
     }
 
     // MARK: - AI監督フィードバック（§20.2）
@@ -960,6 +1077,12 @@ class SessionDataManager: ObservableObject {
                 points: points, heartRateSamples: heartRateSamples
             ) else { continue }
 
+            // 入れ替えが範囲の外なら、そのドリルの向きに固定する
+            let orientation = original.courtOrientation.clipped(
+                from: points.first?.timestamp ?? original.date,
+                to: points.last?.timestamp ?? original.date
+            )
+
             // 平均心拍・最大心拍は saveSession が切り出した心拍の列から計算する（§25.4）。
             // 消費カロリーはセッション全体の累計値でしか記録されておらず、
             // ドリルごとに正確な値を算出できないため、意図的に設定しない
@@ -975,10 +1098,12 @@ class SessionDataManager: ObservableObject {
                 totalDistance: stats.totalDistance,
                 maxSpeed: stats.maxSpeed,
                 avgSpeed: stats.avgSpeed,
-                isFlipped: original.isFlipped,
+                isFlipped: orientation.isFlipped,
+                courtSwitchDate: orientation.switchDate,
                 staminaDrop: stats.staminaDrop,
                 hrIntensityRatio: stats.hrIntensityRatio,
-                splitFromSessionId: original.id
+                splitFromSessionId: original.id,
+                reflection: original.reflection
             )
 
             // saveSession が GPS データから sprintCount / agility を再計算して確定させる
@@ -987,23 +1112,6 @@ class SessionDataManager: ObservableObject {
                 gpsData: GPSData(sessionId: newSession.id, points: points, heartRateSamples: heartRateSamples)
             )
 
-            // stale コピーを使わず、saveSession が確定させた最新の状態を sessions 配列から読み直してアップロードする
-            guard let saved = sessions.first(where: { $0.id == newSession.id }) else { continue }
-            let radar = SessionDataManager.computePlayerRadar(
-                totalDistance: saved.totalDistance,
-                duration: saved.duration,
-                sprintCount: saved.sprintCount ?? 0,
-                agilityTurnCount: saved.agilityTurnCount,
-                staminaDrop: saved.staminaDrop,
-                hrIntensityRatio: saved.hrIntensityRatio,
-                maxSpeed: saved.maxSpeed
-            )
-            do {
-                try await SupabaseManager.shared.uploadSessionSummary(saved, radar: radar)
-                print("✅ 分割セッションのSupabaseアップロード完了: id=\(saved.id)")
-            } catch {
-                print("❌ 分割セッションのSupabaseアップロード失敗: id=\(saved.id) error=\(error)")
-            }
         }
 
         if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
@@ -1434,9 +1542,24 @@ class SessionDataManager: ObservableObject {
         refreshPositionMetrics(for: sessionId)
     }
 
+    /// ユーザーが書いた振り返りを保存する。何も書かれていなければ消す
+    func updateReflection(for sessionId: String, reflection: SessionReflection) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].reflection = reflection.normalized
+        persistSessions()
+    }
+
+    /// 後半の入れ替えの時刻を更新する（nil で解除）。向きが変わるのは updateIsFlipped と同じ
+    func updateCourtSwitchDate(for sessionId: String, date: Date?) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].courtSwitchDate = date
+        persistSessions()
+        refreshPositionMetrics(for: sessionId)
+    }
+
     // MARK: - Position（docs/統計推移仕様書.md §4・§5）
 
-    /// ポジションの推定結果と高さを、紐付いたフィールドと isFlipped から計算し直す（§5.5）。
+    /// ポジションの推定結果と高さを、紐付いたフィールドとコートの向きから計算し直す（§5.5）。
     /// .manual のセッションの position は変えない（estimatedPosition だけ更新する）。
     /// GPS データが読めない場合は何もしない
     func refreshPositionMetrics(for sessionId: String, gpsData providedGPSData: GPSData? = nil) {
@@ -1451,8 +1574,8 @@ class SessionDataManager: ObservableObject {
         var estimated: PlayingPosition?
         var heights: (avg: Double, front: Double, back: Double)?
         if let fieldId = session.fieldId, let field = FieldManager.shared.getField(by: fieldId) {
-            estimated = Self.predictPosition(gpsData: gpsData, field: field, isFlipped: session.isFlipped)
-            heights = Self.computePositionHeights(gpsData: gpsData, field: field, isFlipped: session.isFlipped)
+            estimated = Self.predictPosition(gpsData: gpsData, field: field, orientation: session.courtOrientation)
+            heights = Self.computePositionHeights(gpsData: gpsData, field: field, orientation: session.courtOrientation)
         }
         sessions[index].estimatedPosition = estimated
         sessions[index].avgPositionHeight = heights?.avg
@@ -1503,14 +1626,24 @@ class SessionDataManager: ObservableObject {
 
     private var isBackfilling = false
     private let backfillSprintProfileKey = "backfillSprintProfileKey"
+    private let backfillPositionEstimationVersionKey = "backfillPositionEstimationVersion"
+
+    /// ポジション推定の版。理想ヒートマップの形か集計の基準を変えたら上げると、
+    /// 次回起動時に全セッションの estimatedPosition と高さを計算し直す（手動設定の position は変わらない）
+    private static let positionEstimationVersion = 2
+
+    /// スタミナ低下率の計算ルールの版。ルールを変えたら上げると、次回起動時に全セッションの staminaDrop を計算し直す
+    /// 2: 前半か後半が2分未満なら判定しない（2026-11-08）
+    private let backfillStaminaRuleVersionKey = "backfillStaminaRuleVersion"
+    private static let staminaRuleVersion = 2
 
     /// 速度の外れ値除去（技術実装仕様書 §1.8）のルールの版。ルールを変えたら上げると、
     /// 次回起動時に全セッションの最高速度・スプリント回数を計算し直す
-    private static let speedCleaningVersion = 2
+    private static let speedCleaningVersion = 3
 
     /// スプリント閾値の表（`sprintThreshold(age:gender:)`）の版。表を変えたら上げると、
     /// 年齢・性別が変わっていない利用者でも次回起動時に全セッションのスプリント回数を計算し直す
-    private static let sprintThresholdVersion = 2
+    private static let sprintThresholdVersion = 3
 
     /// 全セッションを確認し直す条件のキー。スプリント閾値を決めるプロフィール（年齢・性別）か、
     /// 速度の外れ値除去のルールが前回の一括計算から変わったら、全セッションの sprintCount・maxSpeed を確認し直す
@@ -1532,43 +1665,49 @@ class SessionDataManager: ObservableObject {
         // sprintCount・maxSpeed のズレは GPS データを読まないと分からないため、閾値のプロフィールか
         // 外れ値除去のルールが前回の一括計算から変わったときだけ全セッションを確認する
         let checkAllSprintCounts = UserDefaults.standard.string(forKey: backfillSprintProfileKey) != profileKey
+        let reestimateAllPositions = UserDefaults.standard.integer(forKey: backfillPositionEstimationVersionKey) != Self.positionEstimationVersion
+        let recomputeAllStamina = UserDefaults.standard.integer(forKey: backfillStaminaRuleVersionKey) != Self.staminaRuleVersion
 
         let ids = sessions.filter { !$0.isSupersededBySplit }.map(\.id)
         var processed = 0
         for id in ids {
             guard let session = sessions.first(where: { $0.id == id }) else { continue }
             let hasField = session.fieldId.flatMap { FieldManager.shared.getField(by: $0) } != nil
-            let needsStamina = session.staminaDrop == nil
+            let needsStamina = session.staminaDrop == nil || recomputeAllStamina
             let needsHR = session.hrIntensityRatio == nil && age != nil
             let needsHeights = hasField && (session.avgPositionHeight == nil || session.backPositionHeight == nil)
-            let needsEstimate = hasField && session.estimatedPosition == nil
+            let needsEstimate = hasField && (session.estimatedPosition == nil || reestimateAllPositions)
             let needsAccuracy = session.gpsAccuracyMedian == nil
-            guard checkAllSprintCounts || needsStamina || needsHR || needsHeights || needsEstimate || needsAccuracy else { continue }
+            let needsHighSpeed = session.highSpeedDistance == nil
+            guard checkAllSprintCounts || needsStamina || needsHR || needsHeights || needsEstimate || needsAccuracy || needsHighSpeed else { continue }
 
             // 12ヶ月分をまとめてメモリに載せないよう、LRU キャッシュには入れずに1件ずつ読む
             guard let gpsData = gpsDataCache[id] ?? loadGPSData(sessionId: id),
                   let index = sessions.firstIndex(where: { $0.id == id }) else { continue }
 
-            var metricsChanged = false
             if needsStamina {
                 let drop = Self.computeStaminaDropRate(buckets: Self.computeTimeSeries(gpsPoints: gpsData.points))
-                if drop != nil { sessions[index].staminaDrop = drop; metricsChanged = true }
+                // ルールの版が変わったときは、判定しなくなった（nil になった）値も消す
+                if drop != nil || recomputeAllStamina { sessions[index].staminaDrop = drop }
             }
             if needsHR, let age {
                 let ratio = Self.computeHeartRateIntensity(
                     gpsPoints: gpsData.points, heartRateSamples: gpsData.heartRateSamples, age: age
                 )?.highIntensityRatio
-                if ratio != nil { sessions[index].hrIntensityRatio = ratio; metricsChanged = true }
+                if ratio != nil { sessions[index].hrIntensityRatio = ratio }
             }
             let sprintCount = Self.computeSprintSegments(gpsData.points).count
             if sessions[index].sprintCount != sprintCount {
                 sessions[index].sprintCount = sprintCount
-                metricsChanged = true
+            }
+            // 高速ランニングの基準もスプリントと同じく年齢・性別で決まるので、同じ条件で計算し直す
+            let highSpeed = Self.computeHighSpeedDistance(gpsData.points)
+            if sessions[index].highSpeedDistance.map({ abs($0 - highSpeed) > 0.01 }) ?? true {
+                sessions[index].highSpeedDistance = highSpeed
             }
             let maxSpeed = Self.cleanedMaxSpeed(gpsData.points)
             if !gpsData.points.isEmpty, abs(sessions[index].maxSpeed - maxSpeed) > 0.001 {
                 sessions[index].maxSpeed = maxSpeed
-                metricsChanged = true
             }
             if needsHeights || needsEstimate {
                 applyPositionMetrics(at: index, gpsData: gpsData)
@@ -1578,30 +1717,14 @@ class SessionDataManager: ObservableObject {
             }
             persistSessions()
 
-            if metricsChanged {
-                // 値型の古いコピーを送らないよう、更新後の sessions 配列から読み直してアップロードする
-                let updated = sessions[index]
-                let radar = Self.computePlayerRadar(
-                    totalDistance: updated.totalDistance,
-                    duration: updated.duration,
-                    sprintCount: updated.sprintCount ?? 0,
-                    agilityTurnCount: updated.agilityTurnCount,
-                    staminaDrop: updated.staminaDrop,
-                    hrIntensityRatio: updated.hrIntensityRatio,
-                    maxSpeed: updated.maxSpeed
-                )
-                do {
-                    try await SupabaseManager.shared.uploadSessionSummary(updated, radar: radar)
-                } catch {
-                    print("❌ 一括計算後のSupabaseアップロード失敗: id=\(updated.id) error=\(error)")
-                }
-            }
             processed += 1
             await Task.yield()
         }
 
         reapplyWingBackRule()
         UserDefaults.standard.set(profileKey, forKey: backfillSprintProfileKey)
+        UserDefaults.standard.set(Self.positionEstimationVersion, forKey: backfillPositionEstimationVersionKey)
+        UserDefaults.standard.set(Self.staminaRuleVersion, forKey: backfillStaminaRuleVersionKey)
         print("✅ 派生メトリクスの一括計算完了: \(processed)件")
     }
 

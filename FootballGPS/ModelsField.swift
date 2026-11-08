@@ -8,6 +8,13 @@
 import Foundation
 import CoreLocation
 
+/// 長くいた場所の集計（Field.dwellCoordinates）の定数
+enum DwellConfig {
+    static let sampleInterval: TimeInterval = 1  // 並べ直す間隔（秒）
+    static let maxGap: TimeInterval = 30         // 点と点の間で数える時間の上限（秒）
+    static let fieldMargin: Double = 5           // フィールドの外でも集計に含める距離（m）。スローインなどと GPS の誤差のため
+}
+
 /// サッカーフィールドの設定
 struct Field: Identifiable, Codable {
     let id: String
@@ -64,6 +71,56 @@ struct Field: Identifiable, Codable {
 
     /// これ未満の縦横比は正方形に近いとみなし、ゴールラインとタッチラインの長さを比べない
     static let squareTolerance = 1.1
+
+    /// GPS 点のフィールド座標を、コートの向きを反映して返す。
+    /// 反転はフィールド中心を軸にした180度回転 (x, y) → (width-x, length-y)
+    func orientedCoordinate(of point: GPSPoint, orientation: CourtOrientation) -> CGPoint? {
+        guard let coordinate = convertToFieldCoordinate(
+            CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+        ) else { return nil }
+        return oriented(coordinate, at: point.timestamp, orientation: orientation)
+    }
+
+    private func oriented(_ coordinate: CGPoint, at timestamp: Date, orientation: CourtOrientation) -> CGPoint {
+        guard orientation.isFlipped(at: timestamp) else { return coordinate }
+        return CGPoint(x: dimensions.width - coordinate.x, y: dimensions.length - coordinate.y)
+    }
+
+    /// 長くいた場所の集計に使う位置（機能仕様書 §9.2）。GPS 点は移動した分しか記録されないので、
+    /// 1秒間隔に並べ直して、止まっていた時間も数えられるようにする。点と点の間は直前の位置に留まったとみなす。
+    /// フィールドから離れた位置（ベンチなど）は除き、すぐ外の位置はフィールドの端に寄せる
+    func dwellCoordinates(of points: [GPSPoint], orientation: CourtOrientation) -> [CGPoint] {
+        guard var sampleTime = points.first?.timestamp else { return [] }
+        var result: [CGPoint] = []
+        result.reserveCapacity(points.count * 2)
+
+        for (index, point) in points.enumerated() {
+            let nextTime = index + 1 < points.count
+                ? points[index + 1].timestamp
+                : point.timestamp.addingTimeInterval(DwellConfig.sampleInterval)
+            guard let coordinate = convertToFieldCoordinate(
+                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+            ) else {
+                sampleTime = max(sampleTime, nextTime)
+                continue
+            }
+            let isNearField = (-DwellConfig.fieldMargin...(dimensions.width + DwellConfig.fieldMargin)).contains(coordinate.x)
+                && (-DwellConfig.fieldMargin...(dimensions.length + DwellConfig.fieldMargin)).contains(coordinate.y)
+            let clamped = CGPoint(
+                x: min(max(coordinate.x, 0), dimensions.width),
+                y: min(max(coordinate.y, 0), dimensions.length)
+            )
+            // 間隔が上限を超えた分は、記録が途切れた時間として数えない
+            let countUntil = point.timestamp.addingTimeInterval(DwellConfig.maxGap)
+            while sampleTime < nextTime {
+                if isNearField && sampleTime < countUntil {
+                    result.append(oriented(clamped, at: sampleTime, orientation: orientation))
+                }
+                sampleTime.addTimeInterval(DwellConfig.sampleInterval)
+            }
+        }
+        return result
+    }
 
     static func distance(_ a: Coordinate, _ b: Coordinate) -> Double {
         CLLocation(latitude: a.latitude, longitude: a.longitude)

@@ -13,7 +13,7 @@ import CoreLocation
 struct DrillSplitFieldMapView: View {
     let gpsData: GPSData
     let field: Field
-    let isFlipped: Bool
+    let orientation: CourtOrientation
     let ranges: [(start: TimeInterval, end: TimeInterval)]
     let breaks: [DrillBreakInterval]
     /// 再生位置（先頭点からの経過秒）。手動切り出し画面でのみ渡し、地図上にマーカーを出す
@@ -31,22 +31,20 @@ struct DrillSplitFieldMapView: View {
 
                 // 除外区間（フィールド入場前/退場後の移動、ドリル間の休憩）: グレーの破線
                 ForEach(Array(breaks.enumerated()), id: \.offset) { _, brk in
-                    let points = convertedPoints(
+                    if let path = createPath(
                         for: SessionDataManager.slicedPoints(gpsData.points, from: brk.startOffset, to: brk.endOffset),
                         in: geometry.size
-                    )
-                    if let path = createPath(points: points) {
+                    ) {
                         path.stroke(Color.gray.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [4, 4]))
                     }
                 }
 
                 // 採用されるドリル区間: 区間ごとに色分けした実線
                 ForEach(Array(ranges.enumerated()), id: \.offset) { index, range in
-                    let points = convertedPoints(
+                    if let path = createPath(
                         for: SessionDataManager.slicedPoints(gpsData.points, from: range.start, to: range.end),
                         in: geometry.size
-                    )
-                    if let path = createPath(points: points) {
+                    ) {
                         path.stroke(Self.segmentColors[index % Self.segmentColors.count], lineWidth: 3)
                     }
                 }
@@ -87,16 +85,10 @@ struct DrillSplitFieldMapView: View {
         let offsetY = (size.height - drawHeight) / 2
 
         return points.compactMap { point in
-            guard let fieldCoord = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else { return nil }
+            guard let coord = field.orientedCoordinate(of: point, orientation: orientation) else { return nil }
 
-            // isFlipped の場合はフィールド中心を軸に180度回転
-            let fx = isFlipped ? field.dimensions.width - fieldCoord.x : fieldCoord.x
-            let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
-
-            let x = offsetX + (fx / field.dimensions.width) * drawWidth
-            let y = offsetY + (1.0 - fy / field.dimensions.length) * drawHeight
+            let x = offsetX + (coord.x / field.dimensions.width) * drawWidth
+            let y = offsetY + (1.0 - coord.y / field.dimensions.length) * drawHeight
             return CGPoint(x: x, y: y)
         }
     }
@@ -120,13 +112,17 @@ struct DrillSplitFieldMapView: View {
         return (drawWidth, drawHeight)
     }
 
-    private func createPath(points: [CGPoint]) -> Path? {
-        guard !points.isEmpty else { return nil }
+    /// 後半の入れ替えをまたいで線をつながない
+    private func createPath(for points: [GPSPoint], in size: CGSize) -> Path? {
         var path = Path()
-        path.move(to: points[0])
-        for point in points.dropFirst() {
-            path.addLine(to: point)
+        for part in orientation.splitAtSwitch(points) {
+            let converted = convertedPoints(for: part, in: size)
+            guard let first = converted.first else { continue }
+            path.move(to: first)
+            for point in converted.dropFirst() {
+                path.addLine(to: point)
+            }
         }
-        return path
+        return path.isEmpty ? nil : path
     }
 }

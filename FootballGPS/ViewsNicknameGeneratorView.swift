@@ -218,17 +218,15 @@ struct NicknameGeneratorView: View {
         let radar = SessionDataManager.computePlayerRadar(
             totalDistance: session.totalDistance,
             duration: session.duration,
+            highSpeedDistance: SessionDataManager.computeHighSpeedDistance(gpsData.points),
             sprintCount: sprintCnt,
-            agilityTurnCount: session.agilityTurnCount,
-            staminaDrop: staminaDrop,
-            hrIntensityRatio: hrIntensity?.highIntensityRatio,
             maxSpeed: session.maxSpeed
         )
 
         let thirdRatios: (defensive: Double, middle: Double, attacking: Double)
         if let fieldId = session.fieldId, let field = FieldManager.shared.getField(by: fieldId) {
             thirdRatios = SessionDataManager.computeThirdRatios(
-                gpsData: gpsData, field: field, isFlipped: session.isFlipped
+                gpsData: gpsData, field: field, orientation: session.courtOrientation
             )
         } else {
             thirdRatios = (0, 0, 0)

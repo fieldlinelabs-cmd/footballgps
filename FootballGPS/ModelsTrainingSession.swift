@@ -31,6 +31,14 @@ struct TrainingSession: Identifiable, Codable {
     // コート入れ替え表示フラグ
     var isFlipped: Bool
 
+    // 後半の入れ替え: この時刻以降の点は isFlipped と逆の向きで扱う（nil = 入れ替えなし、機能仕様書 §9.4）
+    var courtSwitchDate: Date?
+
+    /// セッションのコートの向き。GPS 点をフィールドに置くときは必ずこれを使う
+    var courtOrientation: CourtOrientation {
+        CourtOrientation(isFlipped: isFlipped, switchDate: courtSwitchDate)
+    }
+
     // GPSデータへのパス（Cloud Storageに保存）
     var gpsDataPath: String?
 
@@ -46,6 +54,8 @@ struct TrainingSession: Identifiable, Codable {
     // セッション詳細閲覧時に算出して永続化する派生メトリクス
     var staminaDrop: Double?      // 後半スタミナ低下率（0…1）
     var hrIntensityRatio: Double? // 高強度HR割合（0…100%）
+    // 高速ランニングの距離（m、§13.4.A の基準以上）。起動時の一括計算で埋める。nil = まだ計算していない
+    var highSpeedDistance: Double?
 
     // 自己平均から手動除外するフラグ（nil = false として扱う、旧データとの後方互換用）
     var excludeFromAverage: Bool?
@@ -65,6 +75,9 @@ struct TrainingSession: Identifiable, Codable {
 
     // このセッションがドリル分割によって作られた場合、分割元の結合セッションのid（nil = 分割で作られたものではない）
     var splitFromSessionId: String?
+
+    // ユーザーが書いた振り返り（機能仕様書 §9.7）。端末の中だけに保存し、サーバーには送らない
+    var reflection: SessionReflection?
 
     // ポジション（docs/統計推移仕様書.md §4）。position は集計・表示に使う値で、
     // .manual ならユーザーが選んだ値、.auto なら estimatedPosition に WB ルール（§5.3）を適用した値
@@ -107,6 +120,7 @@ struct TrainingSession: Identifiable, Codable {
         avgSpeed: Double = 0,
         sprintCount: Int? = nil,
         isFlipped: Bool = false,
+        courtSwitchDate: Date? = nil,
         gpsDataPath: String? = nil,
         heartRate: Double? = nil,
         maxHeartRate: Double? = nil,
@@ -119,6 +133,7 @@ struct TrainingSession: Identifiable, Codable {
         pendingSplitBreaks: [DrillBreakInterval]? = nil,
         supersededBySplit: Bool? = nil,
         splitFromSessionId: String? = nil,
+        reflection: SessionReflection? = nil,
         position: PlayingPosition? = nil,
         positionSource: PositionSource? = nil,
         estimatedPosition: PlayingPosition? = nil,
@@ -140,6 +155,7 @@ struct TrainingSession: Identifiable, Codable {
         self.avgSpeed = avgSpeed
         self.sprintCount = sprintCount
         self.isFlipped = isFlipped
+        self.courtSwitchDate = courtSwitchDate
         self.gpsDataPath = gpsDataPath
         self.heartRate = heartRate
         self.maxHeartRate = maxHeartRate
@@ -152,6 +168,7 @@ struct TrainingSession: Identifiable, Codable {
         self.pendingSplitBreaks = pendingSplitBreaks
         self.supersededBySplit = supersededBySplit
         self.splitFromSessionId = splitFromSessionId
+        self.reflection = reflection
         self.position = position
         self.positionSource = positionSource
         self.estimatedPosition = estimatedPosition
@@ -191,6 +208,89 @@ struct TrainingSession: Identifiable, Codable {
         if let activeCalories = activeCalories { dict["activeCalories"] = activeCalories }
 
         return dict
+    }
+}
+
+/// ユーザーが書いた振り返り（機能仕様書 §9.7）。記録に残らない条件を、すべて任意で残す。
+/// TrainingSession のフィールドに使うため、Watchアプリターゲットとも共有するこのファイルに置く
+struct SessionReflection: Codable, Equatable {
+    var opponent: OpponentLevel?
+    var result: MatchResult?
+    var condition: BodyCondition?
+    var weather: WeatherCondition?
+    var memo: String?
+
+    /// 保存する値。メモの前後の空白を除き、何も書かれていなければ nil
+    var normalized: SessionReflection? {
+        var copy = self
+        let trimmed = memo?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        copy.memo = trimmed.isEmpty ? nil : trimmed
+        let isEmpty = copy.opponent == nil && copy.result == nil
+            && copy.condition == nil && copy.weather == nil && copy.memo == nil
+        return isEmpty ? nil : copy
+    }
+
+    /// タグを1行で読める形に並べたもの
+    var tagLabels: [String] {
+        [
+            opponent.map { "相手: \($0.rawValue)" },
+            result?.rawValue,
+            condition.map { "体調: \($0.rawValue)" },
+            weather?.rawValue,
+        ].compactMap { $0 }
+    }
+}
+
+enum OpponentLevel: String, Codable, CaseIterable {
+    case weaker = "弱い"
+    case even = "同じくらい"
+    case stronger = "強い"
+}
+
+enum MatchResult: String, Codable, CaseIterable {
+    case win = "勝ち"
+    case draw = "引き分け"
+    case loss = "負け"
+}
+
+enum BodyCondition: String, Codable, CaseIterable {
+    case bad = "悪い"
+    case normal = "普通"
+    case good = "良い"
+}
+
+enum WeatherCondition: String, Codable, CaseIterable {
+    case sunny = "晴れ"
+    case cloudy = "曇り"
+    case rainy = "雨"
+    case windy = "風が強い"
+}
+
+/// コートの向き（機能仕様書 §9.4）。isFlipped は前半（入れ替えなしなら全体）の向きで、
+/// switchDate 以降の点はその逆の向きになる。切り出した点列でも同じ結果になるよう、位置は時刻で持つ
+struct CourtOrientation: Equatable {
+    var isFlipped: Bool
+    var switchDate: Date? = nil
+
+    /// その時刻の点を180度回転して扱うか
+    func isFlipped(at timestamp: Date) -> Bool {
+        guard let switchDate, timestamp >= switchDate else { return isFlipped }
+        return !isFlipped
+    }
+
+    /// 入れ替えの前と後に点列を分ける（入れ替えをまたいで線を引かないため）。空の側は含めない
+    func splitAtSwitch(_ points: [GPSPoint]) -> [[GPSPoint]] {
+        guard let switchDate else { return points.isEmpty ? [] : [points] }
+        let parts = [points.filter { $0.timestamp < switchDate }, points.filter { $0.timestamp >= switchDate }]
+        return parts.filter { !$0.isEmpty }
+    }
+
+    /// start〜end を切り出したセッションの向き。入れ替えが範囲の外なら、切り出した範囲の向きに固定する
+    func clipped(from start: Date, to end: Date) -> CourtOrientation {
+        guard let switchDate else { return self }
+        if switchDate <= start { return CourtOrientation(isFlipped: !isFlipped) }
+        if switchDate > end { return CourtOrientation(isFlipped: isFlipped) }
+        return self
     }
 }
 
@@ -336,6 +436,15 @@ struct TimeSeriesBucket: Identifiable {
     let sprintCount: Int   // 区間スプリント回数
     let maxSpeed: Double   // 区間最高速度 (m/s)
     let durationSeconds: Double  // 区間の実際の長さ（秒）。最終バケットは5分未満になりうる
+
+    /// 5分に満たない区間（最後の区間だけがなりうる）。距離をそのまま並べると少なく見えるため、グラフでは薄く表示する
+    var isPartial: Bool { durationSeconds < 299.5 }
+
+    /// 区間の長さの表示（1分未満は秒、それ以上は分。分は切り捨て）
+    var durationLabel: String {
+        let seconds = Int(durationSeconds.rounded())
+        return seconds < 60 ? "\(seconds)秒間" : "\(seconds / 60)分間"
+    }
 }
 
 /// プロスタイル定義（ゾーンパラメータから理想ヒートマップを生成して類似度を計算）
@@ -346,7 +455,8 @@ struct ProStyle: Identifiable {
     let defensiveThird: Double  // 守備サード目標比率 (0-1)
     let middleThird:    Double  // 中盤サード目標比率 (0-1)
     let attackingThird: Double  // 攻撃サード目標比率 (0-1)
-    let lateralBias:    Double  // 理想ヒートマップの左右対称アウトサイド質量比率 (0=完全に中央, 1=完全にアウトサイド)
+    let lateralBias:    Double  // 理想ヒートマップのアウトサイド質量比率 (0=完全に中央, 1=完全にアウトサイド)
+    var defensiveLateralBias: Double? = nil  // 守備サードだけ lateralBias と変えるスタイルの比率（偽サイドバック）
     let sprintTarget:   Double  // スプリント目標 (0-1, 基準30回)
     let agilityTarget:  Double  // アジリティ目標 (0-1, 基準50回)
     let maxSpeedTarget: Double  // 最高速度目標 (0-1, 基準8m/s)
@@ -404,7 +514,7 @@ struct ProStyle: Identifiable {
                  maxSpeedTarget: 0.75, heatmapSpread: 0.55),
         ProStyle(id: "false_sb",    name: "偽サイドバック",    category: .sb,
                  defensiveThird: 0.40, middleThird: 0.45, attackingThird: 0.15,
-                 lateralBias: 0.40, sprintTarget: 0.50, agilityTarget: 0.65,
+                 lateralBias: 0.50, defensiveLateralBias: 0.80, sprintTarget: 0.50, agilityTarget: 0.65,
                  maxSpeedTarget: 0.60, heatmapSpread: 0.55),
         ProStyle(id: "solid_sb",    name: "堅実型サイドバック", category: .sb,
                  defensiveThird: 0.55, middleThird: 0.35, attackingThird: 0.10,
@@ -432,26 +542,32 @@ struct StyleSyncDiagnosis {
     let typeResults: [StyleSyncResult]  // 判定済みポジション内のスタイルをスタッツ類似度降順でソート
 }
 
-/// プレイヤータイプ称号（最高スコア軸で決定）
+/// プレイヤータイプ称号（最高スコア軸で決定）。2026-11-08にレーダーを4軸にし、
+/// アジャイル型・スタミナ型をなくした。ハードワーカーは高速ランニングが一番高いときの称号
 enum PlayerType: String {
     case longRunner = "ロングランナー"
-    case sprinter   = "スプリンター"
-    case agile      = "アジャイル型"
-    case stamina    = "スタミナ型"
     case hardWorker = "ハードワーカー"
+    case sprinter   = "スプリンター"
     case speedster  = "スピードスター"
 }
 
-/// レーダーチャート用プレイヤー評価データ（非永続化）
+/// レーダーチャート用プレイヤー評価データ（非永続化、技術実装仕様書 §17.2）
 struct PlayerRadarData {
-    let distance:     Double  // 0…1  基準: 10km
-    let sprint:       Double  // 0…1  基準: 30回
-    let agility:      Double  // 0…1  基準: 50回
-    let stamina:      Double  // 0…1  基準: staminaDrop 1.0
-    let intensity:    Double  // 0…1  基準: 高強度HR 40%
-    let topSpeed:     Double  // 0…1  基準: 8 m/s（約29 km/h）
+    // 0…1（満点＝世界トップの選手の最高値、SessionDataManager.RadarMax）
+    let distance:  Double
+    let highSpeed: Double
+    let sprint:    Double
+    let topSpeed:  Double
+    // 45分あたりに換算した実際の値（最高速度は km/h）
+    let distancePer45:  Double
+    let highSpeedPer45: Double
+    let sprintsPer45:   Double
+    let topSpeedKmh:    Double
     let playerType:   PlayerType
-    let overallScore: Double  // 0…100（6軸平均）
+    let overallScore: Double  // 0…100（4軸平均）
+
+    /// レーダーの軸の順（走力・高速ランニング・スプリント・最高速度）の値
+    var axisValues: [Double] { [distance, highSpeed, sprint, topSpeed] }
 }
 
 // MARK: - AI監督フィードバック（§20）

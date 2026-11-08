@@ -94,8 +94,8 @@ struct MonthlyRecapEngineTests {
 
     @Test func ルールで作る二つ名() {
         #expect(MonthlyRecapEngine.ruleNickname(position: .mf, playerType: .speedster) == "中盤のスピードスター")
-        #expect(MonthlyRecapEngine.ruleNickname(position: .fw, playerType: .stamina) == "最前線の鉄人")
-        #expect(MonthlyRecapEngine.ruleNickname(position: nil, playerType: .agile) == "ピッチのキレ者")
+        #expect(MonthlyRecapEngine.ruleNickname(position: .fw, playerType: .hardWorker) == "最前線のハードワーカー")
+        #expect(MonthlyRecapEngine.ruleNickname(position: nil, playerType: .sprinter) == "ピッチのスプリンター")
     }
 
     @Test func 二つ名は一番よかったセッションのものを優先しその月のセッション以外は使わない() throws {

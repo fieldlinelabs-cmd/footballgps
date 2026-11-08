@@ -81,4 +81,88 @@ struct SpeedCleaningTests {
         let spike = points([8, 8, 8, 30, 8, 8, 8])
         #expect(SessionDataManager.computeSprintSegments(spike).isEmpty)
     }
+
+    // MARK: - 2点まで続く誤読の山（§1.8 の 3）
+
+    /// 1秒間隔の点列。位置は positionKmh の速さで北へ進める（nil なら速度と同じ速さで進む）
+    private func track(_ kmh: [Double], accuracy: Double, positionKmh: Double? = nil) -> [GPSPoint] {
+        var latitude = 35.68
+        return kmh.enumerated().map { i, v in
+            if i > 0 { latitude += (positionKmh ?? v) / 3.6 / 111_320 }
+            return GPSPoint(
+                timestamp: Date(timeIntervalSince1970: Double(i)),
+                latitude: latitude,
+                longitude: 139.76,
+                speed: v / 3.6,
+                altitude: 0,
+                horizontalAccuracy: accuracy
+            )
+        }
+    }
+
+    @Test func GPS精度が悪い2点だけの山は消える() {
+        let maxKmh = SessionDataManager.cleanedMaxSpeed(track([12, 12, 12, 25, 25, 12, 12, 12], accuracy: 14.2)) * 3.6
+        #expect(abs(maxKmh - 12) < 0.01)
+    }
+
+    @Test func 位置の動きと合わない2点だけの山は消える() {
+        // 精度は良いが、位置は時速12kmでしか動いていない
+        let maxKmh = SessionDataManager.cleanedMaxSpeed(
+            track([12, 12, 12, 25, 25, 12, 12, 12], accuracy: 3, positionKmh: 12)
+        ) * 3.6
+        #expect(abs(maxKmh - 12) < 0.01)
+    }
+
+    @Test func 精度が良く位置とも合う2点の山は残る() {
+        let maxKmh = SessionDataManager.cleanedMaxSpeed(track([12, 12, 12, 25, 25, 12, 12, 12], accuracy: 3)) * 3.6
+        #expect(abs(maxKmh - 25) < 0.01)
+    }
+
+    @Test func 前後との差が小さい山は精度が悪くても残る() {
+        // 2026-07-20 09:04 の実データの形（19.6 → 25.1 → 20.8）
+        let maxKmh = SessionDataManager.cleanedMaxSpeed(
+            track([18, 18, 19.6, 25.1, 25.1, 20.8, 16, 10], accuracy: 14.2)
+        ) * 3.6
+        #expect(abs(maxKmh - 25.1) < 0.01)
+    }
+
+    @Test func 実データの誤読の山は消える() {
+        // 2026-07-03 11:23 の実データの形（精度14.2m、12.5 → 24.6 → 4.7）
+        let maxKmh = SessionDataManager.cleanedMaxSpeed(
+            track([4.7, 5.2, 12.5, 24.6, 24.6, 4.7, 3.9, 4.2], accuracy: 14.2)
+        ) * 3.6
+        #expect(maxKmh < 13)
+    }
+
+    // MARK: - スプリントの基準（§13.4）
+
+    private func thresholdKmh(_ age: Int?, _ gender: Gender?) -> Double {
+        (SessionDataManager.sprintThreshold(age: age, gender: gender) * 3.6 * 10).rounded() / 10
+    }
+
+    @Test func 男子のスプリント基準() {
+        let expected: [(Int, Double)] = [
+            (11, 16), (12, 18), (13, 19.5), (14, 20), (15, 20), (16, 25), (39, 25),
+            (40, 18.5), (49, 18.5), (50, 17.5), (59, 17.5), (60, 16.5), (69, 16.5), (70, 15), (85, 15),
+        ]
+        for (age, kmh) in expected {
+            #expect(thresholdKmh(age, .male) == kmh, "\(age)歳")
+        }
+    }
+
+    @Test func 女子のスプリント基準() {
+        let expected: [(Int, Double)] = [
+            (11, 16), (12, 18), (13, 20.5), (15, 20.5), (16, 23), (39, 23),
+            (40, 16), (50, 15.5), (60, 14.5), (70, 13),
+        ]
+        for (age, kmh) in expected {
+            #expect(thresholdKmh(age, .female) == kmh, "\(age)歳")
+        }
+    }
+
+    @Test func 年齢や性別が未設定ならプロの男子の基準() {
+        #expect(thresholdKmh(nil, nil) == 25)
+        #expect(thresholdKmh(nil, .female) == 23)
+        #expect(thresholdKmh(45, nil) == 18.5)
+    }
 }

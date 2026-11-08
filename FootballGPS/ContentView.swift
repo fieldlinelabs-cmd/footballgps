@@ -170,21 +170,6 @@ struct DebugTestView: View {
                 } label: {
                     Label("GPSログを確認", systemImage: "location.fill")
                 }
-                NavigationLink {
-                    SprintMeasurementView()
-                } label: {
-                    Label("計測データ", systemImage: "speedometer")
-                }
-                NavigationLink {
-                    CalibrationStatsView()
-                } label: {
-                    Label("閾値キャリブレーション集計", systemImage: "chart.bar.fill")
-                }
-                NavigationLink {
-                    RadarReferenceStatsView()
-                } label: {
-                    Label("レーダーMax参考集計", systemImage: "chart.bar.fill")
-                }
             } header: {
                 Text("デバッグツール")
             }

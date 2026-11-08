@@ -12,7 +12,7 @@ import CoreLocation
 struct FieldHeatmapView: View {
     let gpsData: GPSData
     let field: Field
-    let isFlipped: Bool
+    let orientation: CourtOrientation
     
     // ヒートマップのグリッドサイズ（倍密化: 約2.5m/セル）
     private let gridRows = 28 // 幅方向（width: 68m）
@@ -22,7 +22,7 @@ struct FieldHeatmapView: View {
         GeometryReader { geometry in
             let (drawWidth, drawHeight) = fieldDrawSize(in: geometry.size)
             let thirdRatios = SessionDataManager.computeThirdRatios(
-                gpsData: gpsData, field: field, isFlipped: isFlipped
+                gpsData: gpsData, field: field, orientation: orientation
             )
             ZStack {
                 // フィールド背景
@@ -71,7 +71,7 @@ struct FieldHeatmapView: View {
     /// ヒートマップデータを計算
     private func calculateHeatmap() -> [[Double]] {
         HeatmapGrid.compute(
-            normalizedPoints: HeatmapGrid.normalizedPoints(gpsData.points, field: field, isFlipped: isFlipped),
+            normalizedPoints: HeatmapGrid.dwellPoints(gpsData.points, field: field, orientation: orientation),
             rows: gridRows,
             cols: gridCols
         )
@@ -81,15 +81,19 @@ struct FieldHeatmapView: View {
 /// ヒートマップの格子の計算（1セッションのヒートマップと、月ごとのまとめの重ねたヒートマップで共有）
 enum HeatmapGrid {
     /// GPS の点をフィールド内の割合（x: ゴールライン方向 0…1、y: タッチライン方向 0…1）に変換する。
-    /// isFlipped の場合はフィールド中心を軸に180度回転する。フィールドの外の点は除く
-    static func normalizedPoints(_ points: [GPSPoint], field: Field, isFlipped: Bool) -> [CGPoint] {
+    /// コートの向きを反映する。軌跡の描画用で、点を増減しないのでフィールドの外の点も 0…1 の外の値で残る。
+    /// ヒートマップの集計には dwellPoints を使う
+    static func normalizedPoints(_ points: [GPSPoint], field: Field, orientation: CourtOrientation) -> [CGPoint] {
         points.compactMap { point in
-            guard let fieldCoord = field.convertToFieldCoordinate(
-                CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-            ) else { return nil }
-            let fx = isFlipped ? field.dimensions.width  - fieldCoord.x : fieldCoord.x
-            let fy = isFlipped ? field.dimensions.length - fieldCoord.y : fieldCoord.y
-            return CGPoint(x: fx / field.dimensions.width, y: fy / field.dimensions.length)
+            guard let coord = field.orientedCoordinate(of: point, orientation: orientation) else { return nil }
+            return CGPoint(x: coord.x / field.dimensions.width, y: coord.y / field.dimensions.length)
+        }
+    }
+
+    /// ヒートマップの集計に使う、1秒間隔の位置（フィールド内の割合）。長くいた場所ほど点が多い
+    static func dwellPoints(_ points: [GPSPoint], field: Field, orientation: CourtOrientation) -> [CGPoint] {
+        field.dwellCoordinates(of: points, orientation: orientation).map {
+            CGPoint(x: $0.x / field.dimensions.width, y: $0.y / field.dimensions.length)
         }
     }
 
@@ -290,7 +294,7 @@ extension Int {
     FieldHeatmapView(
         gpsData: MockData.generateMockGPSData(sessionId: "preview", pointCount: 300),
         field: MockData.mockField,
-        isFlipped: false
+        orientation: CourtOrientation(isFlipped: false)
     )
     .frame(height: 400)
 }

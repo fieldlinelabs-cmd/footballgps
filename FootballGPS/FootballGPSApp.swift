@@ -37,9 +37,7 @@ struct FootballGPSApp: App {
         WindowGroup {
             ContentView()
                 .task {
-                    Task.detached(priority: .background) {
-                        try? await SupabaseManager.shared.ensureAuthenticated()
-                    }
+                    // Supabase の匿名ログインは起動時にはせず、AI機能を使うときにする（技術実装仕様書 §14.2）
                     // 推移グラフ用に、欠けている派生メトリクス・ポジションを一括計算する（統計推移仕様書 §7）
                     await SessionDataManager.shared.backfillDerivedMetrics()
                 }

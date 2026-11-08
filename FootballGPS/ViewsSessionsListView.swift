@@ -123,7 +123,7 @@ struct SessionsListView: View {
                                     )
                                 } label: {
                                     Label(
-                                        session.isExcludedFromAverage ? "平均に含める" : "平均から除外",
+                                        session.isExcludedFromAverage ? "集計に含める" : "集計から除外",
                                         systemImage: session.isExcludedFromAverage ? "checkmark.circle" : "minus.circle"
                                     )
                                 }
@@ -242,7 +242,7 @@ struct SessionRow: View {
                     .foregroundStyle(isExcluded ? .secondary : .primary)
 
                 if session.duration < 300 {
-                    Text("平均対象外")
+                    Text("集計対象外")
                         .font(.caption2)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)

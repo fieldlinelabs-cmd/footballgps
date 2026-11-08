@@ -60,7 +60,7 @@ enum MonthlyRecapDemo {
         var rawFrames: [(Date, [[Double]])] = []
         for (i, day) in days.enumerated() {
             let gps = MockData.generateMockGPSData(sessionId: "demo-\(i)", pointCount: 250)
-            let points = HeatmapGrid.normalizedPoints(gps.points, field: MockData.mockField, isFlipped: false)
+            let points = HeatmapGrid.dwellPoints(gps.points, field: MockData.mockField, orientation: CourtOrientation(isFlipped: false))
             let raw = HeatmapGrid.rawGrid(normalizedPoints: points, rows: rows, cols: cols)
             for r in 0..<rows { for c in 0..<cols { accumulated[r][c] += raw[r][c] } }
             rawFrames.append((day, accumulated))
@@ -85,7 +85,7 @@ enum MonthlyRecapDemo {
 
         let bestGPS = MockData.generateMockGPSData(sessionId: "demo-best", pointCount: 600)
         let bestGrid = HeatmapGrid.compute(
-            normalizedPoints: HeatmapGrid.normalizedPoints(bestGPS.points, field: MockData.mockField, isFlipped: false),
+            normalizedPoints: HeatmapGrid.dwellPoints(bestGPS.points, field: MockData.mockField, orientation: CourtOrientation(isFlipped: false)),
             rows: rows, cols: cols
         )
 

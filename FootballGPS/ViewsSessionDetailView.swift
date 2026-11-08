@@ -39,6 +39,8 @@ struct SessionDetailView: View {
 
     // スプリント区間（GPS速度から計算）
     @State private var sprintSegments: [SprintSegment] = []
+    /// 高速ランニングの距離（m）。今のプロフィールの基準で GPS から計算する（レーダー用）
+    @State private var highSpeedDistance: Double = 0
 
     // 時間帯別運動量（5分単位）
     @State private var timeSeries: [TimeSeriesBucket] = []
@@ -71,6 +73,15 @@ struct SessionDetailView: View {
 
     // ドリルの手動切り出し
     @State private var showManualSplit = false
+
+    // 後半の入れ替え
+    @State private var showCourtSwitchEditor = false
+
+    // 2回を比べる
+    @State private var showingCompare = false
+
+    // 振り返り
+    @State private var showingReflection = false
 
     // ドリル分割の復元
     @State private var showRestoreSplitConfirm = false
@@ -121,12 +132,45 @@ struct SessionDetailView: View {
         dataManager.sessions.first(where: { $0.id == session.id }) ?? session
     }
 
+    /// 2回を比べる画面の比較先の候補（フィールドが削除された記録は並べられないので除く）
+    private var compareCandidates: [TrainingSession] {
+        GrowthTrendEngine.comparisonCandidates(for: displaySession, in: dataManager.sessions)
+            .filter { $0.fieldId.flatMap { fieldManager.getField(by: $0) } != nil }
+    }
+
+    /// 今のコートの向き
+    private var courtOrientation: CourtOrientation {
+        CourtOrientation(isFlipped: isFlipped, switchDate: displaySession.courtSwitchDate)
+    }
+
+    /// プロスタイル診断を、今のコートの向きとセッションのポジションで計算し直す
+    private func refreshStyleSync() {
+        guard let field = currentField else { return }
+        syncDiagnosis = SessionDataManager.computeStyleSync(
+            gpsData: gpsData,
+            field: field,
+            orientation: courtOrientation,
+            position: displaySession.position,
+            positionSource: displaySession.positionSource,
+            sprintCount: sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count,
+            agilityTurnCount: displaySession.agilityTurnCount,
+            maxSpeed: displaySession.maxSpeed
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
                 // セッション情報ヘッダー
+                // 振り返りのシートが開いている間は別のシートを開けないので、シートを開くボタンを無効にする
                 sessionHeader
-                
+                    .disabled(showingReflection)
+
+                SessionReflectionCard(session: displaySession) {
+                    isPlaying = false
+                    showingReflection = true
+                }
+
                 // フィールド未紐付けの場合はピッカーを表示
                 if currentField == nil {
                     fieldPickerSection
@@ -152,6 +196,7 @@ struct SessionDetailView: View {
                                 heatmapView(field: field)
                             case 2:
                                 statisticsView(field: field)
+                                    .disabled(showingReflection)
                             default:
                                 EmptyView()
                             }
@@ -172,13 +217,14 @@ struct SessionDetailView: View {
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
+                    .disabled(showingReflection)
                     .accessibilityLabel("結果を共有")
                 }
             }
         }
         .sheet(isPresented: $showingShareCard) {
             if let field = currentField {
-                ShareCardSheet(data: shareCardData(), gpsData: gpsData, field: field, isFlipped: isFlipped)
+                ShareCardSheet(data: shareCardData(), gpsData: gpsData, field: field, orientation: courtOrientation)
             }
         }
         .sheet(isPresented: $showingFieldPicker) {
@@ -187,6 +233,33 @@ struct SessionDetailView: View {
         .sheet(isPresented: $showingPositionPicker) {
             PositionPickerSheet(session: displaySession)
         }
+        .sheet(isPresented: $showCourtSwitchEditor) {
+            if let field = currentField {
+                NavigationStack {
+                    CourtSwitchEditView(session: displaySession, gpsData: gpsData, field: field, isFlipped: isFlipped)
+                }
+            }
+        }
+        // 診断は統計タブに出るので、タブの中ではなく画面全体で変更を受ける
+        .sheet(isPresented: $showingReflection) {
+            SessionReflectionSheet(session: displaySession)
+        }
+        .sheet(isPresented: $showingCompare) {
+            if let comparison = GrowthTrendEngine.defaultComparison(for: displaySession, candidates: compareCandidates) {
+                NavigationStack {
+                    SessionCompareView(
+                        session: displaySession,
+                        gpsData: gpsData,
+                        candidates: compareCandidates,
+                        initialComparison: comparison
+                    )
+                }
+            }
+        }
+        .onChange(of: isFlipped) { refreshStyleSync() }
+        .onChange(of: displaySession.courtSwitchDate) { refreshStyleSync() }
+        .onChange(of: displaySession.position) { refreshStyleSync() }
+        .onChange(of: displaySession.positionSource) { refreshStyleSync() }
         // 見終わった後のインタースティシャル広告（広告仕様書§4.2.1）。一覧へ戻る・別タブへ切り替えで離れたときに判定する
         .onAppear { InterstitialAdManager.shared.detailDidAppear(sessionId: session.id) }
         .onDisappear { InterstitialAdManager.shared.detailDidDisappear(sessionId: session.id) }
@@ -200,10 +273,8 @@ struct SessionDetailView: View {
         let radar = SessionDataManager.computePlayerRadar(
             totalDistance: displaySession.totalDistance,
             duration: displaySession.duration,
+            highSpeedDistance: highSpeedDistance,
             sprintCount: sprintCnt,
-            agilityTurnCount: displaySession.agilityTurnCount,
-            staminaDrop: SessionDataManager.computeStaminaDropRate(buckets: timeSeries),
-            hrIntensityRatio: hrIntensity?.highIntensityRatio,
             maxSpeed: displaySession.maxSpeed
         )
         return ShareCardData(
@@ -407,7 +478,7 @@ struct SessionDetailView: View {
             FieldPositioningView(
                 gpsData: gpsData,
                 field: field,
-                isFlipped: isFlipped,
+                orientation: courtOrientation,
                 currentPointIndex: currentPointIndex,
                 sprintSegments: showSprints ? sprintSegments : []
             )
@@ -444,6 +515,7 @@ struct SessionDetailView: View {
                             .foregroundStyle(.orange)
                             .clipShape(Capsule())
                     }
+                    .disabled(showingReflection)
                 }
             }
             .padding(.horizontal)
@@ -460,6 +532,7 @@ struct SessionDetailView: View {
                         showRestoreSplitConfirm = true
                     }
                     .font(.caption2)
+                    .disabled(showingReflection)
                 }
                 .padding(.horizontal)
             } else if displaySession.pendingSplitBreaks == nil && !displaySession.isSupersededBySplit {
@@ -482,6 +555,7 @@ struct SessionDetailView: View {
                         showSplitDetectionResult = true
                     }
                     .font(.caption2)
+                    .disabled(showingReflection)
                 }
                 .padding(.horizontal)
             }
@@ -494,7 +568,7 @@ struct SessionDetailView: View {
                     session: displaySession,
                     gpsData: gpsData,
                     field: field,
-                    isFlipped: isFlipped,
+                    orientation: courtOrientation,
                     initialRanges: pendingDrillRanges,
                     onConfirmed: {
                         showManualSplit = false
@@ -535,6 +609,7 @@ struct SessionDetailView: View {
             isPlaying = false
             currentTime = 0
             sprintSegments = SessionDataManager.computeSprintSegments(gpsData.points)
+            highSpeedDistance = SessionDataManager.computeHighSpeedDistance(gpsData.points)
             timeSeries = SessionDataManager.computeTimeSeries(gpsPoints: gpsData.points)
             heartRateSeries = HeartRateAnalysis.series(for: gpsData)
             heartRateSummary = HeartRateAnalysis.summarize(heartRateSeries, age: UserProfileManager.shared.age)
@@ -546,36 +621,15 @@ struct SessionDetailView: View {
             // sprintCount は記録時点の古い閾値で保存されている場合があるため、
             // staminaDrop計算済みかどうかに関わらず、現在の閾値で再計算した値とズレていれば同期する
             let sprintCnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
-            // 派生メトリクスが未保存なら算出して永続化し、Supabaseにアップロード（初回閲覧時）
+            // 派生メトリクスが未保存なら算出して永続化する（初回閲覧時）。
+            // Supabase への送信は 2026-11-08 にやめた（技術実装仕様書 §14）
             if displaySession.staminaDrop == nil {
-                let drop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
-                let hrRatio = hrIntensity?.highIntensityRatio
-                dataManager.updateComputedMetrics(for: session.id, staminaDrop: drop, hrIntensityRatio: hrRatio, sprintCount: sprintCnt)
-                let radar = SessionDataManager.computePlayerRadar(
-                    totalDistance: displaySession.totalDistance,
-                    duration: displaySession.duration,
-                    sprintCount: sprintCnt,
-                    agilityTurnCount: displaySession.agilityTurnCount,
-                    staminaDrop: drop,
-                    hrIntensityRatio: hrRatio,
-                    maxSpeed: displaySession.maxSpeed
+                dataManager.updateComputedMetrics(
+                    for: session.id,
+                    staminaDrop: SessionDataManager.computeStaminaDropRate(buckets: timeSeries),
+                    hrIntensityRatio: hrIntensity?.highIntensityRatio,
+                    sprintCount: sprintCnt
                 )
-                // session は値型のため updateComputedMetrics の変更を反映していない。
-                // staminaDrop/hrIntensityRatio/sprintCount は今計算した値を明示的に上書きしてからアップロードする。
-                // sprintCount は session.sprintCount（記録時点の古い閾値での値）ではなく、
-                // 現在のプロフィール（年齢・性別）の閾値で再計算した sprintCnt を使う（radar計算と同じ値に揃える）
-                var updatedSession = displaySession
-                updatedSession.staminaDrop = drop
-                updatedSession.hrIntensityRatio = hrRatio
-                updatedSession.sprintCount = sprintCnt
-                Task {
-                    do {
-                        try await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
-                        print("✅ Supabaseへの派生メトリクス再同期完了: id=\(updatedSession.id) duration=\(updatedSession.duration)")
-                    } catch {
-                        print("❌ Supabaseへの派生メトリクス再同期に失敗: id=\(updatedSession.id) error=\(error)")
-                    }
-                }
             } else if displaySession.sprintCount != sprintCnt {
                 // staminaDropは計算済みだが、sprintCountだけ古い閾値の値のまま残っているセッションを同期
                 dataManager.updateComputedMetrics(
@@ -584,52 +638,11 @@ struct SessionDetailView: View {
                     hrIntensityRatio: displaySession.hrIntensityRatio,
                     sprintCount: sprintCnt
                 )
-                let radar = SessionDataManager.computePlayerRadar(
-                    totalDistance: displaySession.totalDistance,
-                    duration: displaySession.duration,
-                    sprintCount: sprintCnt,
-                    agilityTurnCount: displaySession.agilityTurnCount,
-                    staminaDrop: displaySession.staminaDrop,
-                    hrIntensityRatio: displaySession.hrIntensityRatio,
-                    maxSpeed: displaySession.maxSpeed
-                )
-                var updatedSession = displaySession
-                updatedSession.sprintCount = sprintCnt
-                Task {
-                    do {
-                        try await SupabaseManager.shared.uploadSessionSummary(updatedSession, radar: radar)
-                        print("✅ Supabaseへの派生メトリクス再同期完了: id=\(updatedSession.id) duration=\(updatedSession.duration)")
-                    } catch {
-                        print("❌ Supabaseへの派生メトリクス再同期に失敗: id=\(updatedSession.id) error=\(error)")
-                    }
-                }
             }
-            if let field = currentField {
-                syncDiagnosis = SessionDataManager.computeStyleSync(
-                    gpsData: gpsData,
-                    field: field,
-                    isFlipped: isFlipped,
-                    sprintCount: sprintCnt,
-                    agilityTurnCount: displaySession.agilityTurnCount,
-                    maxSpeed: displaySession.maxSpeed
-                )
-            }
+            refreshStyleSync()
         }
         .onDisappear {
             isPlaying = false
-        }
-        .onChange(of: isFlipped) { _, flipped in
-            if let field = currentField {
-                let cnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
-                syncDiagnosis = SessionDataManager.computeStyleSync(
-                    gpsData: gpsData,
-                    field: field,
-                    isFlipped: flipped,
-                    sprintCount: cnt,
-                    agilityTurnCount: displaySession.agilityTurnCount,
-                    maxSpeed: displaySession.maxSpeed
-                )
-            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { isPlaying = false }
@@ -656,12 +669,26 @@ struct SessionDetailView: View {
     
     private func heatmapView(field: Field) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            FieldHeatmapView(gpsData: gpsData, field: field, isFlipped: isFlipped)
+            FieldHeatmapView(gpsData: gpsData, field: field, orientation: courtOrientation)
                 .frame(height: 600)
             
             fieldControlsRow
-            
-            Text("赤い部分ほど長時間滞在したエリアです")
+
+            Button {
+                showingCompare = true
+            } label: {
+                Label("比べる", systemImage: "rectangle.split.2x1")
+                    .font(.subheadline)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6))
+                    .foregroundStyle(compareCandidates.isEmpty ? .secondary : .primary)
+                    .clipShape(Capsule())
+            }
+            .disabled(compareCandidates.isEmpty || showingReflection)
+            .padding(.horizontal)
+
+            Text("赤い部分ほど長くいたエリアです")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal)
@@ -781,55 +808,85 @@ struct SessionDetailView: View {
     // MARK: - Field Controls Row
 
     private var fieldControlsRow: some View {
-        HStack(spacing: 12) {
-            Button {
-                isFlipped.toggle()
-                dataManager.updateIsFlipped(for: session.id, isFlipped: isFlipped)
-            } label: {
-                Label(
-                    isFlipped ? "コート入れ替え ✓" : "コート入れ替え",
-                    systemImage: "arrow.left.arrow.right"
-                )
-                .font(.subheadline)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(isFlipped ? Color.blue.opacity(0.15) : Color(.systemGray6))
-                .foregroundStyle(isFlipped ? .blue : .primary)
-                .clipShape(Capsule())
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                courtFlipButton
+
+                Button {
+                    showingFieldPicker = true
+                } label: {
+                    Label("フィールドを変更", systemImage: "map")
+                        .font(.subheadline)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color(.systemGray6))
+                        .foregroundStyle(.primary)
+                        .clipShape(Capsule())
+                }
+
+                Spacer()
             }
 
-            Button {
-                showingFieldPicker = true
-            } label: {
-                Label("フィールドを変更", systemImage: "map")
-                    .font(.subheadline)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color(.systemGray6))
-                    .foregroundStyle(.primary)
-                    .clipShape(Capsule())
-            }
-
-            Spacer()
+            courtSwitchButton
         }
         .padding(.horizontal)
+        .disabled(showingReflection)
+    }
+
+    private var courtFlipButton: some View {
+        Button {
+            isFlipped.toggle()
+            dataManager.updateIsFlipped(for: session.id, isFlipped: isFlipped)
+        } label: {
+            Label(
+                isFlipped ? "コート入れ替え ✓" : "コート入れ替え",
+                systemImage: "arrow.left.arrow.right"
+            )
+            .font(.subheadline)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(isFlipped ? Color.blue.opacity(0.15) : Color(.systemGray6))
+            .foregroundStyle(isFlipped ? .blue : .primary)
+            .clipShape(Capsule())
+        }
+    }
+
+    /// 前半と後半で陣地が入れ替わった試合の、後半の開始位置を指定する（機能仕様書 §9.4）
+    private var courtSwitchButton: some View {
+        let switchOffset = displaySession.courtSwitchDate.flatMap { date in
+            gpsData.points.first.map { date.timeIntervalSince($0.timestamp) }
+        }
+        return Button {
+            isPlaying = false
+            showCourtSwitchEditor = true
+        } label: {
+            Label(
+                switchOffset.map { "前後半を設定 \(String(format: "%02d:%02d", Int($0) / 60, Int($0) % 60)) ✓" } ?? "前後半を設定",
+                systemImage: "arrow.triangle.2.circlepath"
+            )
+            .font(.subheadline)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(switchOffset != nil ? Color.blue.opacity(0.15) : Color(.systemGray6))
+            .foregroundStyle(switchOffset != nil ? .blue : .primary)
+            .clipShape(Capsule())
+        }
+        .disabled(totalDuration < CourtSwitchEditView.minHalfDuration * 2)
     }
     
     // MARK: - Statistics View
     
     private func statisticsView(field: Field) -> some View {
         let thirdRatios = SessionDataManager.computeThirdRatios(
-            gpsData: gpsData, field: field, isFlipped: isFlipped
+            gpsData: gpsData, field: field, orientation: courtOrientation
         )
         let staminaDrop = SessionDataManager.computeStaminaDropRate(buckets: timeSeries)
         let sprintCnt = sprintSegments.isEmpty ? (displaySession.sprintCount ?? 0) : sprintSegments.count
         let radar = SessionDataManager.computePlayerRadar(
             totalDistance: displaySession.totalDistance,
             duration: displaySession.duration,
+            highSpeedDistance: highSpeedDistance,
             sprintCount: sprintCnt,
-            agilityTurnCount: displaySession.agilityTurnCount,
-            staminaDrop: staminaDrop,
-            hrIntensityRatio: hrIntensity?.highIntensityRatio,
             maxSpeed: displaySession.maxSpeed
         )
 
@@ -879,21 +936,24 @@ struct SessionDetailView: View {
             PlayerRadarSection(radar: radar, sessions: dataManager.sessions)
 
             // AI監督フィードバック（§20.7: プレイヤータイプ直後・プロスタイル診断の前に配置）
-            AICoachFeedbackSection(
-                session: session,
-                defaultPosition: displaySession.position?.displayName,
-                sessionSummary: SessionDataManager.buildFeedbackSummaryText(
-                    session: displaySession,
-                    thirdRatios: thirdRatios,
-                    staminaDropRate: staminaDrop,
-                    radar: radar,
-                    sprintCount: sprintCnt,
-                    heartRate: heartRateSummary,
-                    heartRateHalves: HeartRateAnalysis.halfAverages(
-                        heartRateSeries, start: gpsData.points.first?.timestamp ?? displaySession.date, buckets: timeSeries
-                    )
-                )
-            )
+            // 公開版ではAI機能を隠すため、入口であるこの呼び出しを外している（2026-11-08、広告仕様書 §7.2）。
+            // AIへの送信も匿名アカウントの作成も、このセクションからしか起きない。
+            // 再び有効にするときは、§7.2「再び有効にするときの確認事項」を済ませてから下のコメントを戻す。
+            // AICoachFeedbackSection(
+            //     session: session,
+            //     defaultPosition: displaySession.position?.displayName,
+            //     sessionSummary: SessionDataManager.buildFeedbackSummaryText(
+            //         session: displaySession,
+            //         thirdRatios: thirdRatios,
+            //         staminaDropRate: staminaDrop,
+            //         radar: radar,
+            //         sprintCount: sprintCnt,
+            //         heartRate: heartRateSummary,
+            //         heartRateHalves: HeartRateAnalysis.halfAverages(
+            //             heartRateSeries, start: gpsData.points.first?.timestamp ?? displaySession.date, buckets: timeSeries
+            //         )
+            //     )
+            // )
 
             // プロスタイル診断
             if let diagnosis = syncDiagnosis {
@@ -1042,12 +1102,20 @@ struct TimelineChartSection: View {
                         x: .value("時間", "\(bucket.startMinute)分"),
                         y: .value("距離", bucket.distance)
                     )
-                    .foregroundStyle(bucket.id < mid ? Color.blue.opacity(0.7) : Color.orange.opacity(0.7))
+                    // 5分に満たない最後の区間は、距離が少なく見えるだけなので薄くして長さを書き添える
+                    .foregroundStyle((bucket.id < mid ? Color.blue : Color.orange).opacity(bucket.isPartial ? 0.3 : 0.7))
                     .annotation(position: .top) {
-                        if bucket.sprintCount > 0 {
-                            Text("S\(bucket.sprintCount)")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.red)
+                        VStack(spacing: 1) {
+                            if bucket.sprintCount > 0 {
+                                Text("S\(bucket.sprintCount)")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.red)
+                            }
+                            if bucket.isPartial {
+                                Text(bucket.durationLabel)
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -1085,6 +1153,11 @@ struct TimelineChartSection: View {
                 Label("後半", systemImage: "square.fill").foregroundStyle(.orange).font(.caption)
                 Spacer()
                 Text("S=スプリント回数").font(.caption2).foregroundStyle(.secondary)
+            }
+            if let partial = buckets.last, partial.isPartial {
+                Text("薄い棒は5分に満たない区間です（\(partial.durationLabel)）。その分、距離は少なく出ます")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             // スタミナフィードバック
@@ -1187,7 +1260,7 @@ struct TimelineChartSection: View {
                 Text(drop >= 0.85 ? "スタミナ維持: 後半も出力が安定しています" : "後半の運動量が前半比 \(pct)% に低下しています")
                     .font(.caption)
                     .fontWeight(.medium)
-                Text(drop >= 0.85 ? "前後半の走行量がほぼ同じ「スタミナ型」です" : "スタミナ強化でさらに終盤も走れるようになります")
+                Text(drop >= 0.85 ? "前後半の走行量がほぼ同じで、最後まで走れています" : "スタミナ強化でさらに終盤も走れるようになります")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -1203,7 +1276,10 @@ private struct TimelineBucketCard: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text("\(bucket.startMinute)-\(bucket.startMinute + Int(bucket.durationSeconds / 60.0))分")
+            // 5分に満たない区間は終わりの分を出すと「5-5分」のようになるため、長さで書く
+            Text(bucket.isPartial
+                 ? "\(bucket.startMinute)分〜（\(bucket.durationLabel)）"
+                 : "\(bucket.startMinute)-\(bucket.startMinute + 5)分")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(String(format: "%.0fm", bucket.distance))
@@ -1586,44 +1662,28 @@ struct PlayerRadarSection: View {
     let radar: PlayerRadarData
     let sessions: [TrainingSession]
 
-    private let labels = ["走力", "スプリント", "アジリティ", "スタミナ", "高強度", "最高速度"]
-    private var values: [Double] {
-        [radar.distance, radar.sprint, radar.agility, radar.stamina, radar.intensity, radar.topSpeed]
+    private var values: [Double] { radar.axisValues }
+
+    /// 軸ごとの今回の値（45分あたり）。ラベルの説明に出す
+    private var valueTexts: [String] {
+        [
+            "\(Int(radar.distancePer45.rounded()))m",
+            "\(Int(radar.highSpeedPer45.rounded()))m",
+            String(format: "%.1f回", radar.sprintsPer45),
+            String(format: "%.1fkm/h", radar.topSpeedKmh),
+        ]
     }
 
-    // 案A: 研究ベースのアマチュア平均参照値（各軸のMax定数に対する割合、2026-07-20見直し）
-    // 走力130m/分・スプリント1.0/分・アジリティ4.5/分・スタミナ・HR高強度100%（自己指標）・最高速度8m/sを基準
-    // アマ平均の絶対値（走力80m/分・スプリント0.3回/分・アジリティ2.0回/分・高強度30%・最高速度21.6km/h）自体は
-    // 研究値のまま変更していない。Max定数の変更に合わせて比率のみ再計算した
-    private let referenceA: [Double] = [80.0 / 130.0, 0.3 / 1.0, 2.0 / 4.5, 0.30, 30.0 / 100.0, 0.75]
-
-    // 案C: 直近5回の自己平均（5分未満・手動除外は対象外）
+    // 直近5回の自己平均（5分未満・手動除外は対象外）
     private var personalAvg: [Double]? {
         let eligible = sessions
-            .filter { $0.duration >= 300 && !$0.isExcludedFromAverage }
+            .filter { $0.duration >= 300 && !$0.isExcludedFromAverage && !$0.isSupersededBySplit }
             .sorted { $0.date > $1.date }
             .prefix(5)
         guard eligible.count >= 2 else { return nil }
-        let radars = eligible.map { s in
-            SessionDataManager.computePlayerRadar(
-                totalDistance: s.totalDistance,
-                duration: s.duration,
-                sprintCount: s.sprintCount ?? 0,
-                agilityTurnCount: s.agilityTurnCount,
-                staminaDrop: s.staminaDrop,
-                hrIntensityRatio: s.hrIntensityRatio,
-                maxSpeed: s.maxSpeed
-            )
-        }
-        let n = Double(eligible.count)
-        return [
-            radars.map(\.distance).reduce(0, +) / n,
-            radars.map(\.sprint).reduce(0, +) / n,
-            radars.map(\.agility).reduce(0, +) / n,
-            radars.map(\.stamina).reduce(0, +) / n,
-            radars.map(\.intensity).reduce(0, +) / n,
-            radars.map(\.topSpeed).reduce(0, +) / n
-        ]
+        let radars = eligible.map { SessionDataManager.computePlayerRadar(for: $0).axisValues }
+        let n = Double(radars.count)
+        return (0..<RadarChartView.axisCount).map { i in radars.map { $0[i] }.reduce(0, +) / n }
     }
 
     var body: some View {
@@ -1647,9 +1707,9 @@ struct PlayerRadarSection: View {
 
             RadarChartView(
                 values: values,
-                labels: labels,
-                referenceA: referenceA,
-                personalAvg: personalAvg
+                labels: RadarChartView.axisLabels,
+                personalAvg: personalAvg,
+                valueTexts: valueTexts
             )
             .frame(height: 220)
 
@@ -1659,9 +1719,13 @@ struct PlayerRadarSection: View {
                 if personalAvg != nil {
                     RadarLegendItem(color: .green, dashed: false, label: "直近5回平均")
                 }
-                RadarLegendItem(color: .gray, dashed: true, label: "アマ平均(参考)")
             }
             .font(.caption2)
+
+            Text("45分あたりに換算した値です。満点は世界トップの選手の記録です。軸の名前をタップすると説明が出ます。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -1672,10 +1736,8 @@ struct PlayerRadarSection: View {
     private var typeIcon: String {
         switch radar.playerType {
         case .longRunner: return "figure.run"
-        case .sprinter:   return "bolt.fill"
-        case .agile:      return "arrow.triangle.turn.up.right.diamond.fill"
-        case .stamina:    return "battery.100"
         case .hardWorker: return "flame.fill"
+        case .sprinter:   return "bolt.fill"
         case .speedster:  return "hare.fill"
         }
     }
@@ -1683,16 +1745,19 @@ struct PlayerRadarSection: View {
     private var typeColor: Color {
         switch radar.playerType {
         case .longRunner: return .blue
-        case .sprinter:   return .orange
-        case .agile:      return .purple
-        case .stamina:    return .green
         case .hardWorker: return .red
+        case .sprinter:   return .orange
         case .speedster:  return .yellow
         }
     }
 }
 
+/// プレイヤーのレーダーチャート（技術実装仕様書 §17.2）。軸は走力・高速ランニング・スプリント・最高速度の4つで、
+/// 値はすべて45分あたり、満点は世界トップの選手の記録（SessionDataManager.RadarMax）
 struct RadarChartView: View {
+    static let axisLabels = ["走力", "高速ランニング", "スプリント", "最高速度"]
+    static var axisCount: Int { axisLabels.count }
+
     let values: [Double]
     let labels: [String]
     var valuesColor: Color = .blue
@@ -1700,62 +1765,52 @@ struct RadarChartView: View {
     var referenceAColor: Color = .gray
     var personalAvg: [Double]? = nil
     var personalAvgColor: Color = .green
+    /// 軸ごとの今回の値（表示用の文字列）。nil なら説明に出さない
+    var valueTexts: [String]? = nil
 
     @State private var selectedAxisIndex: Int? = nil
 
     private struct AxisDetail {
-        let maxLabel: String   // 軸端に常時表示するMAX値
-        let maxFull: String    // ツールチップに表示する満点の説明
+        let maxLabel: String   // 軸端に常時表示する満点
+        let maxFull: String    // 説明に出す満点の根拠
         let description: String
-        let reference: String
     }
 
     private let axisDetails: [AxisDetail] = [
         AxisDetail(
-            maxLabel: "130m/分",
-            maxFull: "130m/分（分速130m＝時速7.8km）",
-            description: "プレー中の総移動距離を時間で割った値。フィールドをどれだけ広くカバーできるかを示します。",
-            reference: "アマ平均 80m/分"
+            maxLabel: "6,850m",
+            maxFull: "45分で6,850m（キミッヒ選手が1試合で13.73km）",
+            description: "プレー中に走った距離を、45分あたりに換算した値。どれだけ動き続けられるかを示します。"
         ),
         AxisDetail(
-            maxLabel: "1.0回/分",
-            maxFull: "1.0回/分（60分で60回のスプリント）",
-            description: "時速20km/h以上のGPSポイントが2点以上続いた回数を時間で割った値。爆発的なダッシュ力を示します。",
-            reference: "アマ平均 0.3回/分"
+            maxLabel: "630m",
+            maxFull: "45分で630m（プレミアリーグのサイドハーフの上位の水準）",
+            description: "年齢・性別ごとの高速ランニングの基準（16〜39歳は男子 時速20km、女子 時速19km）以上の速さで走った距離を、45分あたりに換算した値。速いペースで何度も走れるかを示します。"
         ),
         AxisDetail(
-            maxLabel: "4.5回/分",
-            maxFull: "4.5回/分（60分で270回の方向転換）",
-            description: "GPS軌跡で60度以上の方向転換を5.4km/h以上の速度で行った回数を時間で割った値。切り返しの敏捷性を示します。",
-            reference: "アマ平均 2.0回/分"
+            maxLabel: "33回",
+            maxFull: "45分で33回（Jリーグ 前田大然選手が1試合で66回）",
+            description: "年齢・性別ごとのスプリントの基準（16〜39歳は男子 時速25km、女子 時速23km）以上で1秒以上走った回数を、45分あたりに換算した値。全力のダッシュを何回できるかを示します。"
         ),
         AxisDetail(
-            maxLabel: "低下なし",
-            maxFull: "後半の移動量 ÷ 前半の移動量 = 1.0（低下なし）",
-            description: "後半の移動量が前半と比べてどれだけ維持できているかを示します。1.0が低下なし、値が低いほど後半に疲労が出ています。",
-            reference: ""
-        ),
-        AxisDetail(
-            maxLabel: "100%",
-            maxFull: "最大心拍数の80%以上で動いた時間の割合（自分の頑張り度、100%が上限）",
-            description: "最大心拍数の80%以上で動いた時間の割合。他人との比較ではなく、自分がどれだけ追い込めたかを示す指標です。心拍データが必要です。",
-            reference: "アマ平均 30%"
-        ),
-        AxisDetail(
-            maxLabel: "28.8km/h",
-            maxFull: "28.8km/h",
-            description: "セッション中にGPSで記録した最高速度。スプリント能力の上限を示します。",
-            reference: "アマ平均 21.6km/h"
+            maxLabel: "37.4km/h",
+            maxFull: "時速37.4km（プレミアリーグ公式記録 ファン・デ・フェン選手）",
+            description: "セッション中にGPSで記録した最高速度。Apple Watchは約1秒ごとに位置を測るため、実際より低めに出ることがあります。"
         ),
     ]
 
-    private func hexagonPath(vals: [Double], cx: CGFloat, cy: CGFloat, r: CGFloat) -> Path {
+    private var axisTotal: Int { labels.count }
+
+    private func angle(_ i: Int) -> Double {
+        -Double.pi / 2 + Double(i) * 2 * Double.pi / Double(max(axisTotal, 1))
+    }
+
+    private func polygonPath(vals: [Double], cx: CGFloat, cy: CGFloat, r: CGFloat) -> Path {
         var path = Path()
-        for i in 0..<6 {
-            let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
+        for i in 0..<axisTotal {
             let v = i < vals.count ? max(0, min(vals[i], 1.0)) : 0
-            let pt = CGPoint(x: cx + CGFloat(cos(angle)) * r * CGFloat(v),
-                             y: cy + CGFloat(sin(angle)) * r * CGFloat(v))
+            let pt = CGPoint(x: cx + CGFloat(cos(angle(i))) * r * CGFloat(v),
+                             y: cy + CGFloat(sin(angle(i))) * r * CGFloat(v))
             if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
         }
         path.closeSubpath()
@@ -1771,41 +1826,39 @@ struct RadarChartView: View {
             ZStack {
                 Canvas { ctx, _ in
                     for level in stride(from: 0.25, through: 1.0, by: 0.25) {
-                        let ring = hexagonPath(
-                            vals: Array(repeating: Double(level), count: 6),
+                        let ring = polygonPath(
+                            vals: Array(repeating: Double(level), count: axisTotal),
                             cx: cx, cy: cy, r: radius
                         )
                         ctx.stroke(ring, with: .color(.gray.opacity(0.25)), lineWidth: 1)
                     }
-                    for i in 0..<6 {
-                        let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
+                    for i in 0..<axisTotal {
                         var path = Path()
                         path.move(to: CGPoint(x: cx, y: cy))
                         path.addLine(to: CGPoint(
-                            x: cx + CGFloat(cos(angle)) * radius,
-                            y: cy + CGFloat(sin(angle)) * radius
+                            x: cx + CGFloat(cos(angle(i))) * radius,
+                            y: cy + CGFloat(sin(angle(i))) * radius
                         ))
                         ctx.stroke(path, with: .color(.gray.opacity(0.25)), lineWidth: 1)
                     }
                     if let refA = referenceA {
-                        let path = hexagonPath(vals: refA, cx: cx, cy: cy, r: radius)
+                        let path = polygonPath(vals: refA, cx: cx, cy: cy, r: radius)
                         ctx.stroke(path, with: .color(referenceAColor.opacity(0.65)),
                                    style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
                     }
                     if let hist = personalAvg {
-                        let path = hexagonPath(vals: hist, cx: cx, cy: cy, r: radius)
+                        let path = polygonPath(vals: hist, cx: cx, cy: cy, r: radius)
                         ctx.fill(path, with: .color(personalAvgColor.opacity(0.12)))
                         ctx.stroke(path, with: .color(personalAvgColor.opacity(0.65)), lineWidth: 1.5)
                     }
-                    let dataPath = hexagonPath(vals: values, cx: cx, cy: cy, r: radius)
+                    let dataPath = polygonPath(vals: values, cx: cx, cy: cy, r: radius)
                     ctx.fill(dataPath, with: .color(valuesColor.opacity(0.25)))
                     ctx.stroke(dataPath, with: .color(valuesColor.opacity(0.75)), lineWidth: 2)
                 }
 
-                // タップ可能なラベル（軸名 + MAX値を常時表示）
-                ForEach(0..<min(6, labels.count), id: \.self) { i in
-                    let angle = -Double.pi / 2 + Double(i) * Double.pi / 3
-                    let lr    = radius + 26
+                // タップ可能なラベル（軸名 + 満点を常時表示）
+                ForEach(0..<axisTotal, id: \.self) { i in
+                    let lr = radius + 26
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             selectedAxisIndex = selectedAxisIndex == i ? nil : i
@@ -1826,8 +1879,8 @@ struct RadarChartView: View {
                     }
                     .buttonStyle(.plain)
                     .position(
-                        x: cx + CGFloat(cos(angle)) * lr,
-                        y: cy + CGFloat(sin(angle)) * lr
+                        x: cx + CGFloat(cos(angle(i))) * lr,
+                        y: cy + CGFloat(sin(angle(i))) * lr
                     )
                 }
 
@@ -1856,14 +1909,23 @@ struct RadarChartView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        HStack(spacing: 4) {
-                            Text("満点（100%）")
+                        if let valueTexts, idx < valueTexts.count {
+                            HStack(spacing: 4) {
+                                Text("今回")
+                                    .font(.caption2.bold())
+                                Text(valueTexts[idx])
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                        HStack(alignment: .top, spacing: 4) {
+                            Text("満点")
                                 .font(.caption2.bold())
-                                .foregroundStyle(.orange)
                             Text(detail.maxFull)
                                 .font(.caption2)
-                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
+                        .foregroundStyle(.orange)
                         .padding(.vertical, 3)
                         .padding(.horizontal, 6)
                         .background(Color.orange.opacity(0.1))
@@ -1872,16 +1934,6 @@ struct RadarChartView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        if !detail.reference.isEmpty {
-                            HStack(spacing: 4) {
-                                Text("アマ平均：")
-                                    .font(.caption2.bold())
-                                    .foregroundStyle(.blue)
-                                Text(detail.reference)
-                                    .font(.caption2)
-                                    .foregroundStyle(.blue)
-                            }
-                        }
                     }
                     .padding(12)
                     .background(Color(.systemBackground))
