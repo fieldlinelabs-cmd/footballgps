@@ -263,6 +263,8 @@ struct SessionDetailView: View {
         // 見終わった後のインタースティシャル広告（広告仕様書§4.2.1）。一覧へ戻る・別タブへ切り替えで離れたときに判定する
         .onAppear { InterstitialAdManager.shared.detailDidAppear(sessionId: session.id) }
         .onDisappear { InterstitialAdManager.shared.detailDidDisappear(sessionId: session.id) }
+        // トラッキングの許可は、最初の記録を見た後に1度だけ求める（広告仕様書 §10.4）
+        .task { await TrackingPermission.requestAfterViewingRecord() }
     }
 
     // MARK: - Share Card
