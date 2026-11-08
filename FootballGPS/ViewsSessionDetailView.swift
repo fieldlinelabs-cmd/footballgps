@@ -936,21 +936,24 @@ struct SessionDetailView: View {
             PlayerRadarSection(radar: radar, sessions: dataManager.sessions)
 
             // AI監督フィードバック（§20.7: プレイヤータイプ直後・プロスタイル診断の前に配置）
-            AICoachFeedbackSection(
-                session: session,
-                defaultPosition: displaySession.position?.displayName,
-                sessionSummary: SessionDataManager.buildFeedbackSummaryText(
-                    session: displaySession,
-                    thirdRatios: thirdRatios,
-                    staminaDropRate: staminaDrop,
-                    radar: radar,
-                    sprintCount: sprintCnt,
-                    heartRate: heartRateSummary,
-                    heartRateHalves: HeartRateAnalysis.halfAverages(
-                        heartRateSeries, start: gpsData.points.first?.timestamp ?? displaySession.date, buckets: timeSeries
-                    )
-                )
-            )
+            // 公開版ではAI機能を隠すため、入口であるこの呼び出しを外している（2026-11-08、広告仕様書 §7.2）。
+            // AIへの送信も匿名アカウントの作成も、このセクションからしか起きない。
+            // 再び有効にするときは、§7.2「再び有効にするときの確認事項」を済ませてから下のコメントを戻す。
+            // AICoachFeedbackSection(
+            //     session: session,
+            //     defaultPosition: displaySession.position?.displayName,
+            //     sessionSummary: SessionDataManager.buildFeedbackSummaryText(
+            //         session: displaySession,
+            //         thirdRatios: thirdRatios,
+            //         staminaDropRate: staminaDrop,
+            //         radar: radar,
+            //         sprintCount: sprintCnt,
+            //         heartRate: heartRateSummary,
+            //         heartRateHalves: HeartRateAnalysis.halfAverages(
+            //             heartRateSeries, start: gpsData.points.first?.timestamp ?? displaySession.date, buckets: timeSeries
+            //         )
+            //     )
+            // )
 
             // プロスタイル診断
             if let diagnosis = syncDiagnosis {
