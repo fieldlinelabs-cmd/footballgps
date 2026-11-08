@@ -107,6 +107,22 @@ struct HeartRateAnalysisTests {
         #expect(halves.second == 170)
     }
 
+    @Test func 後半が2分に満たなければ前後半の心拍を比べない() {
+        // 5分5秒の記録: 前半は0〜5分、後半は最後の5秒だけ
+        let series = samples([(0, 150), (60, 150), (301, 140)])
+        let short = TimeSeriesBucket(id: 1, startMinute: 5, distance: 6, sprintCount: 0, maxSpeed: 1.5, durationSeconds: 5)
+        #expect(HeartRateAnalysis.halfAverages(series, start: start, buckets: [bucket(0), short]) == nil)
+    }
+
+    @Test func 前半か後半が2分に満たなければスタミナを判定しない() {
+        let short = TimeSeriesBucket(id: 1, startMinute: 5, distance: 6, sprintCount: 0, maxSpeed: 1.5, durationSeconds: 5)
+        #expect(SessionDataManager.computeStaminaDropRate(buckets: [bucket(0), short]) == nil)
+        // 12分16秒（前半5分、後半7分16秒）は判定する。後半の短い区間も時間で割るので、同じペースなら1.0
+        let last = TimeSeriesBucket(id: 2, startMinute: 10, distance: 500.0 * 136 / 300, sprintCount: 0, maxSpeed: 5, durationSeconds: 136)
+        let drop = SessionDataManager.computeStaminaDropRate(buckets: [bucket(0), bucket(1), last])
+        #expect(drop.map { abs($0 - 1.0) < 0.0001 } == true)
+    }
+
     @Test func 走行量と心拍の変化の組み合わせで一言を変える() {
         #expect(HeartRateAnalysis.halfComment(staminaDrop: 0.7, firstBPM: 150, secondBPM: 152).contains("疲れ"))
         #expect(HeartRateAnalysis.halfComment(staminaDrop: 0.7, firstBPM: 150, secondBPM: 140).contains("ペースを落とした"))

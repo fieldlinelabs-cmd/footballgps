@@ -314,20 +314,34 @@ class SessionDataManager: ObservableObject {
     /// 最終バケットは5分未満になりうるため、バケット数の単純平均ではなく実時間で重み付けする
     /// （そうしないと短い最終バケットが後半平均を不当に押し下げてしまう）
     /// 返値: 0.85未満なら後半スタミナ低下とみなす
+    /// 前半か後半が `minHalfSeconds` に満たないときは比べられないので nil（判定しない）
     static func computeStaminaDropRate(buckets: [TimeSeriesBucket]) -> Double? {
-        guard buckets.count >= 2 else { return nil }
+        guard hasComparableHalves(buckets) else { return nil }
         let mid = buckets.count / 2
         let firstBuckets = buckets[0..<mid]
         let secondBuckets = buckets[mid...]
 
         let firstDuration = firstBuckets.map(\.durationSeconds).reduce(0, +)
         let secondDuration = secondBuckets.map(\.durationSeconds).reduce(0, +)
-        guard firstDuration > 0, secondDuration > 0 else { return nil }
 
         let firstRate = firstBuckets.map(\.distance).reduce(0, +) / firstDuration
         let secondRate = secondBuckets.map(\.distance).reduce(0, +) / secondDuration
         guard firstRate > 0 else { return nil }
         return secondRate / firstRate
+    }
+
+    /// 前半・後半それぞれに最低限必要な長さ（秒）。5分5秒の記録だと後半が最後の5秒だけになり、
+    /// 練習を終えて歩いた数秒で「後半に落ちた」と判定されていた（2026-11-08）
+    static let minHalfSeconds: TimeInterval = 120
+
+    /// 前半と後半（区間の数の半分で区切る）の両方が `minHalfSeconds` 以上あるか。
+    /// スタミナ低下率と前後半の平均心拍で同じ条件を使う
+    static func hasComparableHalves(_ buckets: [TimeSeriesBucket]) -> Bool {
+        guard buckets.count >= 2 else { return false }
+        let mid = buckets.count / 2
+        let firstDuration = buckets[0..<mid].map(\.durationSeconds).reduce(0, +)
+        let secondDuration = buckets[mid...].map(\.durationSeconds).reduce(0, +)
+        return firstDuration >= minHalfSeconds && secondDuration >= minHalfSeconds
     }
 
     /// サード別滞在割合を計算（守備/中盤/攻撃、永続化しない）
@@ -1618,6 +1632,11 @@ class SessionDataManager: ObservableObject {
     /// 次回起動時に全セッションの estimatedPosition と高さを計算し直す（手動設定の position は変わらない）
     private static let positionEstimationVersion = 2
 
+    /// スタミナ低下率の計算ルールの版。ルールを変えたら上げると、次回起動時に全セッションの staminaDrop を計算し直す
+    /// 2: 前半か後半が2分未満なら判定しない（2026-11-08）
+    private let backfillStaminaRuleVersionKey = "backfillStaminaRuleVersion"
+    private static let staminaRuleVersion = 2
+
     /// 速度の外れ値除去（技術実装仕様書 §1.8）のルールの版。ルールを変えたら上げると、
     /// 次回起動時に全セッションの最高速度・スプリント回数を計算し直す
     private static let speedCleaningVersion = 3
@@ -1647,13 +1666,14 @@ class SessionDataManager: ObservableObject {
         // 外れ値除去のルールが前回の一括計算から変わったときだけ全セッションを確認する
         let checkAllSprintCounts = UserDefaults.standard.string(forKey: backfillSprintProfileKey) != profileKey
         let reestimateAllPositions = UserDefaults.standard.integer(forKey: backfillPositionEstimationVersionKey) != Self.positionEstimationVersion
+        let recomputeAllStamina = UserDefaults.standard.integer(forKey: backfillStaminaRuleVersionKey) != Self.staminaRuleVersion
 
         let ids = sessions.filter { !$0.isSupersededBySplit }.map(\.id)
         var processed = 0
         for id in ids {
             guard let session = sessions.first(where: { $0.id == id }) else { continue }
             let hasField = session.fieldId.flatMap { FieldManager.shared.getField(by: $0) } != nil
-            let needsStamina = session.staminaDrop == nil
+            let needsStamina = session.staminaDrop == nil || recomputeAllStamina
             let needsHR = session.hrIntensityRatio == nil && age != nil
             let needsHeights = hasField && (session.avgPositionHeight == nil || session.backPositionHeight == nil)
             let needsEstimate = hasField && (session.estimatedPosition == nil || reestimateAllPositions)
@@ -1667,7 +1687,8 @@ class SessionDataManager: ObservableObject {
 
             if needsStamina {
                 let drop = Self.computeStaminaDropRate(buckets: Self.computeTimeSeries(gpsPoints: gpsData.points))
-                if drop != nil { sessions[index].staminaDrop = drop }
+                // ルールの版が変わったときは、判定しなくなった（nil になった）値も消す
+                if drop != nil || recomputeAllStamina { sessions[index].staminaDrop = drop }
             }
             if needsHR, let age {
                 let ratio = Self.computeHeartRateIntensity(
@@ -1703,6 +1724,7 @@ class SessionDataManager: ObservableObject {
         reapplyWingBackRule()
         UserDefaults.standard.set(profileKey, forKey: backfillSprintProfileKey)
         UserDefaults.standard.set(Self.positionEstimationVersion, forKey: backfillPositionEstimationVersionKey)
+        UserDefaults.standard.set(Self.staminaRuleVersion, forKey: backfillStaminaRuleVersionKey)
         print("✅ 派生メトリクスの一括計算完了: \(processed)件")
     }
 

@@ -162,11 +162,11 @@ enum HeartRateAnalysis {
         }
     }
 
-    /// 前半・後半の平均心拍。前半と後半の区切りは computeStaminaDropRate と同じ（区間の数の半分）
+    /// 前半・後半の平均心拍。前半と後半の区切りと、短すぎて比べない条件は computeStaminaDropRate と同じ
     static func halfAverages(
         _ series: [HeartRateSample], start: Date, buckets: [TimeSeriesBucket]
     ) -> (first: Double, second: Double)? {
-        guard buckets.count >= 2 else { return nil }
+        guard SessionDataManager.hasComparableHalves(buckets) else { return nil }
         let boundary = start.addingTimeInterval(Double(buckets[buckets.count / 2].startMinute * 60))
         guard let first = summarize(series.filter { $0.timestamp < boundary }, age: nil)?.averageBPM,
               let second = summarize(series.filter { $0.timestamp >= boundary }, age: nil)?.averageBPM

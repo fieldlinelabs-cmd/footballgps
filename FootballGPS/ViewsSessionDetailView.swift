@@ -1099,12 +1099,20 @@ struct TimelineChartSection: View {
                         x: .value("時間", "\(bucket.startMinute)分"),
                         y: .value("距離", bucket.distance)
                     )
-                    .foregroundStyle(bucket.id < mid ? Color.blue.opacity(0.7) : Color.orange.opacity(0.7))
+                    // 5分に満たない最後の区間は、距離が少なく見えるだけなので薄くして長さを書き添える
+                    .foregroundStyle((bucket.id < mid ? Color.blue : Color.orange).opacity(bucket.isPartial ? 0.3 : 0.7))
                     .annotation(position: .top) {
-                        if bucket.sprintCount > 0 {
-                            Text("S\(bucket.sprintCount)")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.red)
+                        VStack(spacing: 1) {
+                            if bucket.sprintCount > 0 {
+                                Text("S\(bucket.sprintCount)")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.red)
+                            }
+                            if bucket.isPartial {
+                                Text(bucket.durationLabel)
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -1142,6 +1150,11 @@ struct TimelineChartSection: View {
                 Label("後半", systemImage: "square.fill").foregroundStyle(.orange).font(.caption)
                 Spacer()
                 Text("S=スプリント回数").font(.caption2).foregroundStyle(.secondary)
+            }
+            if let partial = buckets.last, partial.isPartial {
+                Text("薄い棒は5分に満たない区間です（\(partial.durationLabel)）。その分、距離は少なく出ます")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             // スタミナフィードバック
@@ -1260,7 +1273,10 @@ private struct TimelineBucketCard: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text("\(bucket.startMinute)-\(bucket.startMinute + Int(bucket.durationSeconds / 60.0))分")
+            // 5分に満たない区間は終わりの分を出すと「5-5分」のようになるため、長さで書く
+            Text(bucket.isPartial
+                 ? "\(bucket.startMinute)分〜（\(bucket.durationLabel)）"
+                 : "\(bucket.startMinute)-\(bucket.startMinute + 5)分")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(String(format: "%.0fm", bucket.distance))

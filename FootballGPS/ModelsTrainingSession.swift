@@ -436,6 +436,15 @@ struct TimeSeriesBucket: Identifiable {
     let sprintCount: Int   // 区間スプリント回数
     let maxSpeed: Double   // 区間最高速度 (m/s)
     let durationSeconds: Double  // 区間の実際の長さ（秒）。最終バケットは5分未満になりうる
+
+    /// 5分に満たない区間（最後の区間だけがなりうる）。距離をそのまま並べると少なく見えるため、グラフでは薄く表示する
+    var isPartial: Bool { durationSeconds < 299.5 }
+
+    /// 区間の長さの表示（1分未満は秒、それ以上は分。分は切り捨て）
+    var durationLabel: String {
+        let seconds = Int(durationSeconds.rounded())
+        return seconds < 60 ? "\(seconds)秒間" : "\(seconds / 60)分間"
+    }
 }
 
 /// プロスタイル定義（ゾーンパラメータから理想ヒートマップを生成して類似度を計算）
