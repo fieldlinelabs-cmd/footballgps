@@ -56,42 +56,43 @@ struct PlayerDataView: View {
     }
 
     private var headerCard: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 14) {
-                if hasTeamInfo {
+        // エンブレムはチーム名と同じ行に置く。以前は右上に重ねていたため、
+        // 長い二つ名や名前がエンブレムの下にもぐっていた（2026-11-08）
+        VStack(alignment: .leading, spacing: 14) {
+            if hasTeamInfo {
+                HStack(spacing: 12) {
                     Text(profileManager.profile.teamName?.isEmpty == false ? profileManager.profile.teamName! : "所属チーム未設定")
                         .font(.subheadline.bold())
                         .foregroundStyle(.secondary)
-                        .padding(.trailing, 90)
-                }
-
-                HStack(spacing: 20) {
-                    avatarView
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let latestNickname {
-                            Button {
-                                showNicknameReason = true
-                            } label: {
-                                Text("「\(latestNickname.nickname)」")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        Text(profileManager.profile.displayName.isEmpty ? "名前未設定" : profileManager.profile.displayName)
-                            .font(.headline)
-                        Text("累計プレー時間")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        totalPlayTimeText
-                    }
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    teamEmblemView
                 }
             }
 
-            if hasTeamInfo {
-                teamEmblemView
+            HStack(spacing: 20) {
+                avatarView
+                VStack(alignment: .leading, spacing: 6) {
+                    if let latestNickname {
+                        Button {
+                            showNicknameReason = true
+                        } label: {
+                            Text("「\(latestNickname.nickname)」")
+                                .font(.caption.bold())
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text(profileManager.profile.displayName.isEmpty ? "名前未設定" : profileManager.profile.displayName)
+                        .font(.headline)
+                    Text("累計プレー時間")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    totalPlayTimeText
+                }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
