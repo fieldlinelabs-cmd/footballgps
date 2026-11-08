@@ -146,22 +146,9 @@ struct SettingsView: View {
                 }
                 .onChange(of: profileManager.profile.teamName) { _, _ in profileManager.save() }
 
-                Section {
-                    NavigationLink {
-                        Text("フィールド管理（ステップ2で実装）")
-                    } label: {
-                        Label("フィールド管理", systemImage: "map.fill")
-                    }
-                    
-                    NavigationLink {
-                        Text("通知設定")
-                    } label: {
-                        Label("通知", systemImage: "bell.fill")
-                    }
-                } header: {
-                    Text("設定")
-                }
-                
+                // 「フィールド管理」「通知」の仮の画面は公開前に外した（2026-11-08、docs/公開準備.md §1）。
+                // フィールドは専用のタブで管理でき、通知は月間まとめの1種類だけでiOSの設定から切り替えられるため
+
                 Section {
                     NavigationLink {
                         MeasurementHelpView()
@@ -175,11 +162,14 @@ struct SettingsView: View {
                         Label("スプリントの基準", systemImage: "figure.run")
                     }
 
-                    Link(destination: URL(string: "https://example.com")!) {
-                        Label("ヘルプ", systemImage: "questionmark.circle.fill")
-                    }
-                    
-                    Link(destination: URL(string: "https://example.com")!) {
+                    // 外部の「ヘルプ」リンクは外した（2026-11-08）。アプリ内の「数値の見方と着け方」と重なるため。
+                    // App Storeに必要なサポートURLは別に用意する（docs/公開準備.md §2）
+
+                    // Appleの審査でアプリ内から読めることが必要なため、アプリ内の画面で表示する。
+                    // 同じ文面を site/privacy.html として公開し、App Store ConnectにはそのURLを登録する
+                    NavigationLink {
+                        PrivacyPolicyView()
+                    } label: {
                         Label("プライバシーポリシー", systemImage: "hand.raised.fill")
                     }
                 } header: {
