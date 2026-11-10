@@ -15,13 +15,9 @@ import UIKit
 final class NativeAdManager: NSObject, ObservableObject {
     static let shared = NativeAdManager()
 
-    // Debugビルドは実機で動作確認できるようGoogle公式のテスト用ID。
-    // 本番IDはAdMobでネイティブ広告の広告ユニットを作成後にここへ設定する（未設定の間は何もしない）。
-    #if DEBUG
-    private let adUnitID: String? = "ca-app-pub-3940256099942544/3986624511"
-    #else
-    private let adUnitID: String? = nil
-    #endif
+    // 広告ユニットIDはAdConfigurationで決める（Debug・TestFlightはテスト用ID、App Store版は本番ID、広告仕様書 §10.2）。
+    // nil の間（本番ID未設定・配布元の判定中）は何もしない
+    private var adUnitID: String? { AdConfiguration.adUnitID(for: .native) }
 
     // 1回のリクエストで受け取れる広告数の上限（GADMultipleAdsAdLoaderOptions）
     private let maxAds = 5

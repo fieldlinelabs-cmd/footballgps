@@ -31,7 +31,7 @@ enum TrackingPermission {
         guard ATTrackingManager.trackingAuthorizationStatus == .notDetermined else { return false }
         // 13歳未満と分かっている利用者には出さない（子ども向けの扱い、広告仕様書 §10.3）。
         // 生年月日は任意のため、未入力の利用者には出す
-        if let age = UserProfileManager.shared.age, age < 13 { return false }
+        if AdConfiguration.isChildDirected(age: UserProfileManager.shared.age) { return false }
         return true
     }
 }
