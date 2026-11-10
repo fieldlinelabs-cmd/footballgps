@@ -17,13 +17,9 @@ import UIKit
 final class InterstitialAdManager: NSObject, ObservableObject {
     static let shared = InterstitialAdManager()
 
-    // Debugビルドは実機で動作確認できるようGoogle公式のテスト用ID。
-    // 本番IDはAdMobでインタースティシャルの広告ユニットを作成後にここへ設定する（未設定の間は何もしない）。
-    #if DEBUG
-    private let adUnitID: String? = "ca-app-pub-3940256099942544/4411468910"
-    #else
-    private let adUnitID: String? = nil
-    #endif
+    // 広告ユニットIDはAdConfigurationで決める（Debug・TestFlightはテスト用ID、App Store版は本番ID、広告仕様書 §10.2）。
+    // nil の間（本番ID未設定・配布元の判定中）は何もしない
+    private var adUnitID: String? { AdConfiguration.adUnitID(for: .interstitial) }
 
     private let minimumDwellSeconds: TimeInterval = 10
     // 戻る操作の画面遷移が終わってから表示するための待ち時間

@@ -101,7 +101,11 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .onChange(of: profileManager.profile.displayName) { _, _ in profileManager.save() }
-                .onChange(of: profileManager.profile.birthDate) { _, _ in profileManager.save() }
+                .onChange(of: profileManager.profile.birthDate) { _, _ in
+                    profileManager.save()
+                    // 年齢が変わると子ども向けのタグも変わる（広告仕様書 §10.3）
+                    AdConfiguration.applyAudienceSettings()
+                }
                 .onChange(of: profileManager.profile.gender) { _, _ in profileManager.save() }
                 .onChange(of: profileManager.profile.playerCategory) { _, _ in profileManager.save() }
 
