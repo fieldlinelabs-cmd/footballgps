@@ -118,9 +118,18 @@ enum AdConfiguration {
     /// 今の年齢に合わせて、すべての広告の要求に付く設定を更新する。
     /// 年齢は保存せず毎回生年月日から計算するため、起動時・前面に戻ったとき・生年月日を変えたときに呼ぶ
     static func applyAudienceSettings() {
-        let isChild = isChildDirected(age: UserProfileManager.shared.age)
+        let age = UserProfileManager.shared.age
+        let isChild = isChildDirected(age: age)
         let configuration = GADMobileAds.sharedInstance().requestConfiguration
         configuration.tagForChildDirectedTreatment = isChild ? true : nil
         configuration.maxAdContentRating = isChild ? .general : nil
+
+        #if DEBUG
+        // 実機での確認用。SDKに渡った値をそのまま出す（テスト広告はタグの有無で見た目が変わらないため）
+        let ageText = age.map { "\($0)歳" } ?? "生年月日なし"
+        let tag = configuration.tagForChildDirectedTreatment.map { "\($0)" } ?? "nil"
+        let rating = configuration.maxAdContentRating?.rawValue ?? "nil"
+        print("🎬 子ども向けのタグ: \(isChild ? "オン" : "オフ")（年齢 \(ageText)、tagForChildDirectedTreatment=\(tag)、maxAdContentRating=\(rating)）")
+        #endif
     }
 }

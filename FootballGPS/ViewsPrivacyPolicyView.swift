@@ -18,7 +18,7 @@ enum SupportInfo {
     static let supportURL = URL(string: "https://fieldlinelabs-cmd.github.io/footballgps/")!
     static let privacyPolicyURL = URL(string: "https://fieldlinelabs-cmd.github.io/footballgps/privacy.html")!
     /// 制定日（改定したら改定日を足す）
-    static let privacyPolicyDate = "2026年11月8日 制定"
+    static let privacyPolicyDate = "2026年11月8日 制定、2026年11月10日 改定"
 }
 
 struct PrivacyPolicyView: View {
@@ -47,7 +47,7 @@ struct PrivacyPolicyView: View {
             "位置情報は、計測中の走った軌跡の記録と、フィールドの登録に使います。位置情報を端末の外に送ることはありません。",
         ]),
         PolicySection(title: "5. 広告（Google AdMob）", paragraphs: [
-            "本アプリは、Google LLCが提供する広告配信サービス「Google AdMob」を利用しています。広告の表示と効果の測定のため、AdMobが端末の情報（端末の種類、OSのバージョン、IPアドレス、広告の表示やタップの状況など）を収集することがあります。",
+            "本アプリは、Google LLCが提供する広告配信サービス「Google AdMob」を利用しています。広告の表示と効果の測定、Googleによる分析のため、AdMobが次の情報を収集することがあります: 端末の情報（端末の種類、OSのバージョン、IPアドレス）、IPアドレスから推定したおおまかな地域、アプリの操作や広告の表示・タップの状況、アプリの動作状況（クラッシュや性能の情報）、広告識別子（IDFA）。",
             "広告識別子（IDFA）は、利用者がトラッキングを許可した場合に限って使われます。許可しない場合も、広告は表示されます。",
             "Googleによる情報の取り扱いは、Googleのプライバシーポリシーをご覧ください。",
         ]),
